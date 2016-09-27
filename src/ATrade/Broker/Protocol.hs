@@ -1,22 +1,69 @@
+{-# LANGUAGE OverloadedStrings, MultiWayIf #-}
 
 module ATrade.Broker.Protocol (
+  BrokerServerRequest(..),
+  BrokerServerResponse(..),
+  Notification(..)
 ) where
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
 import Data.Aeson
+import Data.Aeson.Types
 import Data.Int
 import ATrade.Types
 
 type RequestSqnum = Int64
 
-data BrokerServerRequest = RequestSubmitOrder Order
-  | RequestCancelOrder OrderId
-  | RequestNotifications
+data BrokerServerRequest = RequestSubmitOrder RequestSqnum Order
+  | RequestCancelOrder RequestSqnum OrderId
+  | RequestNotifications RequestSqnum
+  deriving (Eq, Show)
+
+instance FromJSON BrokerServerRequest where
+  parseJSON = withObject "object" (\obj -> do
+    sqnum <- obj .: "request-sqnum"
+    parseRequest sqnum obj)
+    where
+      parseRequest :: RequestSqnum -> Object -> Parser BrokerServerRequest
+      parseRequest sqnum obj
+        | HM.member "order" obj = do
+          order <- obj .: "order"
+          RequestSubmitOrder sqnum <$> parseJSON order
+        | HM.member "cancel-order" obj = do
+          orderId <- obj .: "cancel-order"
+          RequestCancelOrder sqnum <$> parseJSON orderId
+        | HM.member "request-notifications" obj = return (RequestNotifications sqnum)
+
+instance ToJSON BrokerServerRequest where
+  toJSON (RequestSubmitOrder sqnum order) = object ["request-sqnum" .= sqnum,
+    "order" .= order ]
+  toJSON (RequestCancelOrder sqnum oid) = object ["request-sqnum" .= sqnum,
+    "cancel-order" .= oid ]
+  toJSON (RequestNotifications sqnum) = object ["request-sqnum" .= sqnum,
+    "request-notifications" .= ("" :: T.Text) ]
 
 data BrokerServerResponse = ResponseOrderSubmitted OrderId
-  | ResponseOrderCancelled
+  | ResponseOrderCancelled OrderId
   | ResponseNotifications [Notification]
+  deriving (Eq, Show)
+
+instance FromJSON BrokerServerResponse where
+  parseJSON = withObject "object" (\obj ->
+    if | HM.member "order-id" obj -> do
+        oid <- obj .: "order-id"
+        return $ ResponseOrderSubmitted oid
+       | HM.member "order-cancelled" obj -> do
+        oid <- obj .: "order-cancelled"
+        return $ ResponseOrderCancelled oid
+       | HM.member "notifications" obj -> do
+        notifications <- obj .: "notifications"
+        ResponseNotifications <$> parseJSON notifications)
+
+instance ToJSON BrokerServerResponse where
+  toJSON (ResponseOrderSubmitted oid) = object [ "order-id" .= oid ]
+  toJSON (ResponseOrderCancelled oid) = object [ "order-cancelled" .= oid ]
+  toJSON (ResponseNotifications notifications) = object [ "notifications" .= notifications ]
 
 data Notification = OrderNotification OrderId OrderState | TradeNotification Trade
   deriving (Eq, Show)

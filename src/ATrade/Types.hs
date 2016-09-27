@@ -10,7 +10,8 @@ module ATrade.Types (
   Operation(..),
   OrderState(..),
   Order(..),
-  Trade(..)
+  Trade(..),
+  OrderId(..)
 ) where
 
 import Control.Monad
