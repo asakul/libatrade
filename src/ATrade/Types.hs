@@ -9,7 +9,8 @@ module ATrade.Types (
   OrderPrice(..),
   Operation(..),
   OrderState(..),
-  Order(..)
+  Order(..),
+  Trade(..)
 ) where
 
 import Control.Monad
@@ -270,3 +271,42 @@ instance ToJSON Order where
         "signal-id" .= orderSignalId order ]
       ifMaybe :: (ToJSON a, KeyValue b) => Text -> (a -> Bool) -> a -> Maybe b
       ifMaybe name pred val = if pred val then Just (name .= val) else Nothing
+
+data Trade = Trade {
+  tradeOrderId :: OrderId,
+  tradePrice :: Decimal,
+  tradeQuantity :: Integer,
+  tradeVolume :: Decimal,
+  tradeVolumeCurrency :: String,
+  tradeOperation :: Operation,
+  tradeAccount :: String,
+  tradeSecurity :: String,
+  tradeTimestamp :: UTCTime,
+  tradeSignalId :: SignalId }
+  deriving (Show, Eq)
+
+instance FromJSON Trade where
+  parseJSON (Object trade) = Trade  <$>
+    trade .: "order-id"             <*>
+    trade .: "price"                <*>
+    trade .: "quantity"             <*>
+    trade .: "volume"               <*>
+    trade .: "volume-currency"      <*>
+    trade .: "operation"            <*>
+    trade .: "account"              <*>
+    trade .: "security"             <*>
+    trade .: "execution-time"       <*>
+    trade .: "signal-id"
+  parseJSON _ = fail "Should be object"
+
+instance ToJSON Trade where
+  toJSON trade = object [ "order-id" .= tradeOrderId trade,
+    "price" .= tradePrice trade,
+    "quantity" .= tradeQuantity trade,
+    "volume" .= tradeVolume trade,
+    "volume-currency" .= tradeVolumeCurrency trade,
+    "operation" .= tradeOperation trade,
+    "account" .= tradeAccount trade,
+    "security" .= tradeSecurity trade,
+    "execution-time" .= tradeTimestamp trade,
+    "signal-id" .= tradeSignalId trade]

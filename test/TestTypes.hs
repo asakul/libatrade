@@ -83,6 +83,19 @@ instance Arbitrary Order where
     arbitrary <*>
     arbitrary
 
+instance Arbitrary Trade where
+  arbitrary = Trade <$>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary
+
 properties = testGroup "Types" [
     testTickSerialization
   , testSignalIdSerialization
@@ -90,6 +103,7 @@ properties = testGroup "Types" [
   , testOperationSerialization
   , testOrderStateSerialization
   , testOrderSerialization
+  , testTradeSerialization
   ]
 
 testTickSerialization = QC.testProperty "Deserialize serialized tick"
@@ -119,5 +133,10 @@ testOrderStateSerialization = QC.testProperty "Deserialize serialized OrderState
 
 testOrderSerialization = QC.testProperty "Deserialize serialized Order"
   (\v -> case (decode . encode $ v :: Maybe Order) of
+    Just s -> s == v
+    Nothing -> False)
+
+testTradeSerialization = QC.testProperty "Deserialize serialized Trade"
+  (\v -> case (decode . encode $ v :: Maybe Trade) of
     Just s -> s == v
     Nothing -> False)
