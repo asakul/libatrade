@@ -1,11 +1,15 @@
 
-import TestTypes
+import qualified TestTypes
+import qualified TestQuoteSourceServer
 
 import Test.Tasty
 
 main :: IO ()
-main = defaultMain tests
+main = defaultMain $ testGroup "Tests" [properties, unitTests]
 
-tests :: TestTree
-tests = testGroup "Tests" [TestTypes.properties]
+properties :: TestTree
+properties = testGroup "Properties" [TestTypes.properties]
+
+unitTests :: TestTree
+unitTests = testGroup "Unit-tests" [TestQuoteSourceServer.unitTests]
 

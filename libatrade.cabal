@@ -16,6 +16,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     ATrade.Types
+                     , ATrade.QuoteSource.Server
   build-depends:       base >= 4.7 && < 5
                      , Decimal
                      , time
@@ -24,6 +25,9 @@ library
                      , text
                      , binary
                      , aeson
+                     , BoundedChan
+                     , hslogger
+                     , zeromq4-haskell
   default-language:    Haskell2010
 
 executable libatrade-exe
@@ -55,6 +59,11 @@ test-suite libatrade-test
                      , time
                      , aeson
                      , text
+                     , BoundedChan
+                     , hslogger
+                     , zeromq4-haskell
+                     , bytestring
+                     , monad-loops
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
