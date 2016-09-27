@@ -1,25 +1,33 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
 
 module ATrade.Types (
   Tick(..),
   DataType(..),
   serializeTick,
-  deserializeTick
+  deserializeTick,
+  SignalId(..),
+  OrderPrice(..),
+  Operation(..),
+  OrderState(..),
+  Order(..)
 ) where
 
-import Data.Decimal
-import Data.Time.Clock
-import Data.DateTime
-import Data.ByteString.Lazy as B
-import Data.Text as T
-import Data.Text.Encoding as E
-import Data.List as L
+import Control.Monad
+import Data.Aeson
+import Data.Aeson.Types
 import Data.Binary.Builder
 import Data.Binary.Get
+import Data.ByteString.Lazy as B
+import Data.DateTime
+import Data.Decimal
 import Data.Int
-import Data.Word
+import Data.List as L
+import Data.Maybe
 import Data.Ratio
-import Control.Monad
+import Data.Text as T
+import Data.Text.Encoding as E
+import Data.Time.Clock
+import Data.Word
 
 data DataType = Unknown
   | Price
@@ -121,3 +129,144 @@ deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
         r = toInteger nanopart % 1000000000
 
 deserializeTick _ = Nothing
+
+data SignalId = SignalId {
+  strategyId :: T.Text,
+  signalName :: T.Text,
+  comment :: T.Text }
+  deriving (Show, Eq)
+
+instance FromJSON SignalId where
+  parseJSON (Object o) = SignalId <$>
+    o .: "strategy-id" .!= ""     <*>
+    o .: "signal-name" .!= ""     <*>
+    o .: "comment"      .!= ""
+  parseJSON _ = fail "Should be object"
+
+instance ToJSON SignalId where
+  toJSON sid = object [ "strategy-id" .= strategyId sid,
+    "signal-name" .= signalName sid,
+    "comment" .= comment sid ]
+
+instance FromJSON Decimal where
+  parseJSON = withScientific "number" (return . realFracToDecimal 10 . toRational) 
+
+instance ToJSON Decimal where
+  toJSON = Number . fromRational . toRational
+
+data OrderPrice = Market | Limit Decimal | Stop Decimal Decimal | StopMarket Decimal
+  deriving (Show, Eq)
+
+decimal :: (RealFrac r) => r -> Decimal
+decimal = realFracToDecimal 10
+
+instance FromJSON OrderPrice where
+  parseJSON (String s) = when (s /= "market") (fail "If string, then should be 'market'") >>
+    return Market
+
+  parseJSON (Number n) = return $ Limit $ decimal n
+  parseJSON (Object v) = do
+    triggerPrice <- v .: "trigger" :: Parser Double
+    execPrice <- v .: "execution"
+    case execPrice of
+      (String s) -> when (s /= "market") (fail "If string, then should be 'market'") >> return $ StopMarket (decimal triggerPrice)
+      (Number n) -> return $ Stop (decimal triggerPrice) (decimal n)
+      _ -> fail "Should be either number or 'market'"
+
+  parseJSON _ = fail "OrderPrice"
+
+instance ToJSON OrderPrice where
+  toJSON op = case op of
+    Market -> String "market"
+    (Limit d) -> Number $ convert d
+    (Stop t e) -> object [ "trigger" .= convert t, "execution" .= convert e ]
+    (StopMarket t) -> object [ "trigger" .= convert t, "execution" .= ("market" :: Text) ]
+    where
+      convert = fromRational . toRational
+
+data Operation = Buy | Sell
+  deriving (Show, Eq)
+
+instance FromJSON Operation where
+  parseJSON (String s)
+    | s == "buy" = return Buy
+    | s == "sell" = return Sell
+    | otherwise = fail "Should be either 'buy' or 'sell'"
+  parseJSON _ = fail "Should be string"
+
+instance ToJSON Operation where
+  toJSON Buy = String "buy"
+  toJSON Sell = String "sell"
+
+data OrderState = Unsubmitted
+  | Submitted
+  | PartiallyExecuted
+  | Executed
+  | Cancelled
+  | Rejected
+  | OrderError
+  deriving (Show, Eq)
+
+instance FromJSON OrderState where
+  parseJSON (String s)
+    | s == "unsubmitted" = return Unsubmitted
+    | s == "submitted" = return Submitted
+    | s == "partially-executed" = return PartiallyExecuted
+    | s == "executed" = return Executed
+    | s == "cancelled" = return Cancelled
+    | s == "rejected" = return Rejected
+    | s == "error" = return OrderError
+    | otherwise = fail "Invlaid state"
+
+  parseJSON _ = fail "Should be string"
+
+instance ToJSON OrderState where
+  toJSON os = case os of
+    Unsubmitted -> String "unsubmitted"
+    Submitted -> String "submitted"
+    PartiallyExecuted -> String "partially-executed"
+    Executed -> String "executed"
+    Cancelled -> String "cancelled"
+    Rejected -> String "rejected"
+    OrderError -> String "error"
+
+type OrderId = Integer
+
+data Order = Order {
+  orderId :: OrderId,
+  orderAccountId :: String,
+  orderSecurity :: String,
+  orderPrice :: OrderPrice,
+  orderQuantity :: Integer,
+  orderExecutedQuantity :: Integer,
+  orderOperation :: Operation,
+  orderState :: OrderState,
+  orderSignalId :: SignalId }
+  deriving (Show, Eq)
+
+instance FromJSON Order where
+  parseJSON (Object v) = Order      <$>
+    v .:? "order-id" .!= 0          <*>
+    v .:  "account"                 <*>
+    v .:  "security"                <*>
+    v .:  "price"                   <*>
+    v .:  "quantity"                <*>
+    v .:? "executed-quantity" .!= 0 <*>
+    v .:  "operation"               <*>
+    v .:  "state" .!= Unsubmitted   <*>
+    v .:  "signal-id"
+
+  parseJSON _ = fail "Should be string"
+
+instance ToJSON Order where
+  toJSON order = object $ base ++ catMaybes [ifMaybe "order-id" (/= 0) (orderId order), ifMaybe "executed-quantity" (/= 0) (orderExecutedQuantity order)]
+    where
+      base = [ "account" .= orderAccountId order,
+        "security" .= orderSecurity order,
+        "price" .= orderPrice order,
+        "quantity" .= orderQuantity order,
+        "operation" .= orderOperation order,
+        "state" .= orderState order,
+        "signal-id" .= orderSignalId order ]
+      ifMaybe :: (ToJSON a, KeyValue b) => Text -> (a -> Bool) -> a -> Maybe b
+      ifMaybe name pred val = if pred val then Just (name .= val) else Nothing
