@@ -84,12 +84,17 @@ testBrokerServerSubmitOrder = testCase "Broker Server submits order" $ withConte
     orderQuantity = 10,
     orderOperation = Buy
   }
-  bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS -> 
+  bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
     withSocket ctx Req (\sock -> do
       connect sock (T.unpack ep)
       send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 order)
       threadDelay 10000
       s <- readIORef broState
       (length . orders) s @?= 1
+      resp <- decode . BL.fromStrict <$> receive sock
+      case resp of
+        Just (ResponseOrderSubmitted _) -> return ()
+        Nothing -> assertFailure "Invalid response"
+
       )))
-    
+
