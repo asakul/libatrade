@@ -39,7 +39,7 @@ data BrokerServerState = BrokerServerState {
   bsSocket :: Socket Router,
   orderToBroker :: M.Map OrderId BrokerInterface,
   orderMap :: M.Map OrderId PeerId, -- Matches 0mq client identities with corresponding orders
-  lastPacket :: M.Map PeerId (RequestSqnum, B.ByteString),
+  lastPacket :: M.Map PeerId (RequestSqnum, BrokerServerResponse),
   pendingNotifications :: M.Map PeerId [Notification],
   brokers :: [BrokerInterface],
   completionMvar :: MVar (),
@@ -87,8 +87,33 @@ brokerServerThread state = finally brokerServerThread' cleanup
       sock <- bsSocket <$> readIORef state
       msg <- receiveMulti sock
       case msg of
-        [peerId, _, payload] -> handleMessage peerId payload >>= sendMessage sock peerId
+        [peerId, _, payload] ->
+          case decode . BL.fromStrict $ payload of
+            Just request -> do
+              let sqnum = requestSqnum request
+              -- Here, we should check if previous packet sequence number is the same
+              -- If it is, we should resend previous response
+              lastPackMap <- lastPacket <$> readIORef state
+              case shouldResend sqnum peerId lastPackMap of
+                Just response -> sendMessage sock peerId response -- Resend
+                Nothing -> do
+                  -- Handle incoming request, send response
+                  response <- handleMessage peerId request
+                  sendMessage sock peerId response
+                  -- and store response in case we'll need to resend it
+                  atomicMapIORef state (\s -> s { lastPacket = M.insert peerId (sqnum, response) (lastPacket s)})
+            Nothing -> do
+              -- If we weren't able to parse request, we should send error
+              -- but shouldn't update lastPacket
+              let response = ResponseError "Invalid request"
+              sendMessage sock peerId response
         _ -> warningM "Broker.Server" ("Invalid packet received: " ++ show msg)
+
+    shouldResend sqnum peerId lastPackMap = case M.lookup peerId lastPackMap of
+      Just (lastSqnum, response) -> if sqnum == lastSqnum
+        then Just response
+        else Nothing
+      Nothing -> Nothing
 
     cleanup = do
       sock <- bsSocket <$> readIORef state
@@ -96,11 +121,11 @@ brokerServerThread state = finally brokerServerThread' cleanup
       mv <- completionMvar <$> readIORef state
       putMVar mv ()
 
-    handleMessage :: B.ByteString -> B.ByteString -> IO BrokerServerResponse
-    handleMessage peerId payload = do
+    handleMessage :: PeerId -> BrokerServerRequest -> IO BrokerServerResponse
+    handleMessage peerId request = do
       bros <- brokers <$> readIORef state
-      case decode . BL.fromStrict $ payload of
-        Just (RequestSubmitOrder sqnum order) ->
+      case request of
+        RequestSubmitOrder sqnum order ->
           case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
               oid <- nextOrderId
@@ -111,21 +136,20 @@ brokerServerThread state = finally brokerServerThread' cleanup
               return $ ResponseOrderSubmitted oid
 
             Nothing -> return $ ResponseError "Unknown account"
-        Just (RequestCancelOrder sqnum oid) -> do
+        RequestCancelOrder sqnum oid -> do
           m <- orderToBroker <$> readIORef state
           case M.lookup oid m of
             Just bro -> do
               cancelOrder bro oid
               return $ ResponseOrderCancelled oid
             Nothing -> return $ ResponseError "Unknown order"
-        Just (RequestNotifications sqnum) -> do
+        RequestNotifications sqnum -> do
           maybeNs <- M.lookup peerId . pendingNotifications <$> readIORef state
           case maybeNs of
             Just ns -> do
               atomicMapIORef state (\s -> s { pendingNotifications = M.insert peerId [] (pendingNotifications s)})
               return $ ResponseNotifications ns
             Nothing -> return $ ResponseNotifications []
-        Nothing -> return $ ResponseError "Unable to parse request"
 
     sendMessage sock peerId resp = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])
 

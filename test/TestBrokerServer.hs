@@ -31,49 +31,7 @@ import qualified Data.List as L
 import Data.IORef
 import Data.UUID as U
 import Data.UUID.V4 as UV4
-
-data MockBrokerState = MockBrokerState {
-  orders :: [Order],
-  cancelledOrders :: [Order],
-  notificationCallback :: Maybe (Notification -> IO ())
-}
-
-mockSubmitOrder :: IORef MockBrokerState -> Order -> IO ()
-mockSubmitOrder state order = do
-  atomicMapIORef state (\s -> s { orders = submittedOrder : orders s })
-  maybeCb <- notificationCallback <$> readIORef state
-  case maybeCb of
-    Just cb -> cb $ OrderNotification (orderId order) Submitted
-    Nothing -> return ()
-  where
-    submittedOrder = order { orderState = Submitted }
-
-mockCancelOrder :: IORef MockBrokerState -> OrderId -> IO Bool
-mockCancelOrder state oid = do
-  ors <- orders <$> readIORef state
-  case L.find (\o -> orderId o == oid) ors of
-    Just order -> atomicModifyIORef' state (\s -> (s { cancelledOrders = order : cancelledOrders s}, True))
-    Nothing -> return False
-
-mockStopBroker :: IORef MockBrokerState -> IO ()
-mockStopBroker state = return ()
-
-
-mkMockBroker accs = do
-  state <- newIORef MockBrokerState {
-    orders = [],
-    cancelledOrders = [],
-    notificationCallback = Nothing
-  }
-
-  return (BrokerInterface {
-    accounts = accs,
-    setNotificationCallback = \cb -> atomicMapIORef state (\s -> s { notificationCallback = cb }),
-    submitOrder = mockSubmitOrder state,
-    cancelOrder = mockCancelOrder state,
-    stopBroker = mockStopBroker state
-  }, state)
-
+import MockBroker
 
 unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerSubmitOrder
@@ -81,12 +39,12 @@ unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerCancelOrder
   , testBrokerServerCancelUnknownOrder
   , testBrokerServerCorruptedPacket
-  , testBrokerServerGetNotifications ]
+  , testBrokerServerGetNotifications
+  , testBrokerServerDuplicateRequest ]
 
-testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
-  ep <- toText <$> UV4.nextRandom
-  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep)
-  stopBrokerServer broS)
+--
+-- Few helpers
+--
 
 makeEndpoint = do
   uid <- toText <$> UV4.nextRandom
@@ -108,6 +66,14 @@ defaultOrder = mkOrder {
     orderOperation = Buy
   }
 
+--
+-- Tests
+--
+
+testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
+  ep <- toText <$> UV4.nextRandom
+  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep)
+  stopBrokerServer broS)
 
 testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
   step "Setup"
@@ -252,6 +218,10 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
         send sock [] (BL.toStrict . encode $ RequestNotifications 2)
         threadDelay 10000
 
+        -- We should obtain 3 notifications:
+        -- 1. When order became Submitted (from Unsubmitted)
+        -- 2. When order became Executed (our first notificationCallback call)
+        -- 3. Corresponding Trade notificatiot (our second notificationCallback call)
         step "Reading response"
         resp <- decode . BL.fromStrict <$> receive sock
         case resp of
@@ -260,8 +230,8 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
             let (TradeNotification newtrade) = head ns
             let (OrderNotification oid newstate) = ns !! 1
             orderId @=? oid
-            Executed @=? newstate 
-            trade @=? newtrade 
+            Executed @=? newstate
+            trade @=? newtrade
           Just _ -> assertFailure "Invalid response"
           Nothing -> assertFailure "Invalid response"
 
@@ -277,3 +247,31 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
           Just _ -> assertFailure "Invalid response"
           Nothing -> assertFailure "Invalid response"
         )))
+
+testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate request" $ \step -> withContext (\ctx -> do
+  step "Setup"
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+  ep <- makeEndpoint
+  bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    withSocket ctx Req (\sock -> do
+      connectAndSendOrder step sock defaultOrder ep
+
+      step "Reading response"
+      (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+
+      step "Sending duplicate request (with same sequence number)"
+      send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 defaultOrder)
+      threadDelay 10000
+
+      step "Checking that only one order is submitted"
+      s <- readIORef broState
+      (length . orders) s @?= 1
+
+      step "Reading response from duplicate request"
+      resp <- decode . BL.fromStrict <$> receive sock
+      case resp of
+        Just (ResponseOrderSubmitted oid) -> orderId @?= oid
+        Just _ -> assertFailure "Invalid response"
+        Nothing -> assertFailure "Invalid response"
+
+      )))

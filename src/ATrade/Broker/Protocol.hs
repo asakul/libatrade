@@ -5,7 +5,8 @@ module ATrade.Broker.Protocol (
   BrokerServerResponse(..),
   Notification(..),
   notificationOrderId,
-  RequestSqnum(..)
+  RequestSqnum(..),
+  requestSqnum
 ) where
 
 import qualified Data.HashMap.Strict as HM
@@ -21,6 +22,11 @@ data BrokerServerRequest = RequestSubmitOrder RequestSqnum Order
   | RequestCancelOrder RequestSqnum OrderId
   | RequestNotifications RequestSqnum
   deriving (Eq, Show)
+
+requestSqnum :: BrokerServerRequest -> RequestSqnum
+requestSqnum (RequestSubmitOrder sqnum _) = sqnum
+requestSqnum (RequestCancelOrder sqnum _) = sqnum
+requestSqnum (RequestNotifications sqnum) = sqnum
 
 instance FromJSON BrokerServerRequest where
   parseJSON = withObject "object" (\obj -> do
