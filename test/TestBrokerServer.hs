@@ -73,7 +73,8 @@ testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withCont
   broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep)
   stopBrokerServer broS)
 
-testBrokerServerSubmitOrder = testCase "Broker Server submits order" $ withContext (\ctx -> do
+testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
+  step "Setup"
   uid <- toText <$> UV4.nextRandom
   (mockBroker, broState) <- mkMockBroker ["demo"]
   let ep = "inproc://brokerserver" `T.append` uid
@@ -86,11 +87,18 @@ testBrokerServerSubmitOrder = testCase "Broker Server submits order" $ withConte
   }
   bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
     withSocket ctx Req (\sock -> do
+      step "Connecting"
       connect sock (T.unpack ep)
+
+      step "Sending request"
       send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 order)
       threadDelay 10000
+
+      step "Checking that order is submitted to BrokerInterface"
       s <- readIORef broState
       (length . orders) s @?= 1
+
+      step "Reading response"
       resp <- decode . BL.fromStrict <$> receive sock
       case resp of
         Just (ResponseOrderSubmitted _) -> return ()
