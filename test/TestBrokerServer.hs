@@ -96,20 +96,22 @@ connectAndSendOrder step sock order ep = do
   send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 order)
   threadDelay 10000
 
-testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
-  step "Setup"
-  (mockBroker, broState) <- mkMockBroker ["demo"]
-  ep <- makeEndpoint
-  let order = mkOrder {
+defaultOrder = mkOrder {
     orderAccountId = "demo",
     orderSecurity = "FOO",
     orderPrice = Market,
     orderQuantity = 10,
     orderOperation = Buy
   }
+
+
+testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
+  step "Setup"
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+  ep <- makeEndpoint
   bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
     withSocket ctx Req (\sock -> do
-      connectAndSendOrder step sock order ep
+      connectAndSendOrder step sock defaultOrder ep
 
       step "Checking that order is submitted to BrokerInterface"
       s <- readIORef broState
@@ -119,6 +121,7 @@ testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \ste
       resp <- decode . BL.fromStrict <$> receive sock
       case resp of
         Just (ResponseOrderSubmitted _) -> return ()
+        Just _ -> assertFailure "Invalid response"
         Nothing -> assertFailure "Invalid response"
 
       )))
@@ -128,16 +131,9 @@ testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server retur
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    let order = mkOrder {
-      orderAccountId = "foobar",
-      orderSecurity = "FOO",
-      orderPrice = Market,
-      orderQuantity = 10,
-      orderOperation = Buy
-    }
     bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
-        connectAndSendOrder step sock order ep
+        connectAndSendOrder step sock (defaultOrder { orderAccountId = "foobar" }) ep
 
         step "Reading response"
         resp <- decode . BL.fromStrict <$> receive sock
@@ -153,16 +149,9 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    let order = mkOrder {
-      orderAccountId = "demo",
-      orderSecurity = "FOO",
-      orderPrice = Market,
-      orderQuantity = 10,
-      orderOperation = Buy
-    }
     bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
-        connectAndSendOrder step sock order ep
+        connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
 
         step "Sending order cancellation request"
@@ -186,16 +175,9 @@ testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancell
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    let order = mkOrder {
-      orderAccountId = "demo",
-      orderSecurity = "FOO",
-      orderPrice = Market,
-      orderQuantity = 10,
-      orderOperation = Buy
-    }
     bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
-        connectAndSendOrder step sock order ep
+        connectAndSendOrder step sock defaultOrder ep
         receive sock
 
         step "Sending order cancellation request"
