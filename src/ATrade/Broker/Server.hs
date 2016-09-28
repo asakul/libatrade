@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 
 module ATrade.Broker.Server (
   startBrokerServer,
@@ -34,6 +35,7 @@ data BrokerInterface = BrokerInterface {
 
 data BrokerServerState = BrokerServerState {
   bsSocket :: Socket Router,
+  orderToBroker :: M.Map OrderId BrokerInterface,
   orderMap :: M.Map OrderId B.ByteString, -- Matches 0mq client identities with corresponding orders
   lastPacket :: M.Map B.ByteString (RequestSqnum, B.ByteString),
   pendingNotifications :: [(Notification, UTCTime)], -- List of tuples (Order with new state, Time when notification enqueued)
@@ -53,6 +55,7 @@ startBrokerServer brokers c ep = do
   state <- newIORef BrokerServerState {
     bsSocket = sock,
     orderMap = M.empty,
+    orderToBroker = M.empty,
     lastPacket = M.empty,
     pendingNotifications = [],
     brokers = brokers,
@@ -79,23 +82,32 @@ brokerServerThread state = finally brokerServerThread' cleanup
       bros <- brokers <$> readIORef state
       case decode . BL.fromStrict $ payload of
         Just (RequestSubmitOrder sqnum order) ->
-          case findBroker (orderAccountId order) bros of
+          case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
               oid <- nextOrderId
               submitOrder bro order { orderId = oid }
+              atomicModifyIORef' state (\s -> (s { orderToBroker = M.insert oid bro (orderToBroker s)}, ()))
               return (peerId, ResponseOrderSubmitted oid)
 
-            Nothing -> error "foobar"
+            Nothing -> return (peerId, ResponseError "Unknown account")
+        Just (RequestCancelOrder sqnum oid) -> do
+          m <- orderToBroker <$> readIORef state
+          case M.lookup oid m of 
+            Just bro -> do
+              cancelOrder bro oid
+              return (peerId, ResponseOrderCancelled oid)
+            Nothing -> return (peerId, ResponseError "Unknown order")
+        Just _ -> return (peerId, ResponseError "Not implemented")
         Nothing -> error "foobar"
     handleMessage x = do
       warningM "Broker.Server" ("Invalid packet received: " ++ show x)
       error "foobar"
 
     sendMessage sock (peerId, resp) = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])
-        
-    findBroker account = L.find (L.elem account . accounts)
+
+    findBrokerForAccount account = L.find (L.elem account . accounts)
     nextOrderId = atomicModifyIORef' state (\s -> ( s {orderIdCounter = 1 + orderIdCounter s}, orderIdCounter s))
-      
+
 
 stopBrokerServer :: BrokerServerHandle -> IO ()
 stopBrokerServer (BrokerServerHandle tid compMv) = yield >> killThread tid >> readMVar compMv
