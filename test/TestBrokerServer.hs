@@ -79,7 +79,8 @@ unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerSubmitOrderToUnknownAccount
   , testBrokerServerCancelOrder
   , testBrokerServerCancelUnknownOrder
-  , testBrokerServerCorruptedPacket ]
+  , testBrokerServerCorruptedPacket
+  , testBrokerServerGetNotifications ]
 
 testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
   ep <- toText <$> UV4.nextRandom
@@ -194,7 +195,6 @@ testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancell
           Nothing -> assertFailure "Invalid response"
         )))
 
-
 testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet" $
   \step -> withContext (\ctx -> do
     step "Setup"
@@ -218,3 +218,61 @@ testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet
         )))
   where
     corrupt = B.drop 5
+
+testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications request" $
+  \step -> withContext (\ctx -> do
+    step "Setup"
+    ep <- makeEndpoint
+    (mockBroker, broState) <- mkMockBroker ["demo"]
+    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+      withSocket ctx Req (\sock -> do
+        -- We have to actually submit order, or else server won't know that we should
+        -- be notified about this order
+        connectAndSendOrder step sock defaultOrder ep
+        (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+        threadDelay 10000
+
+        (Just cb) <- notificationCallback <$> readIORef broState
+        cb (OrderNotification orderId Executed)
+        let trade = Trade {
+          tradeOrderId = orderId,
+          tradePrice = 19.82,
+          tradeQuantity = 1,
+          tradeVolume = 1982,
+          tradeVolumeCurrency = "TEST_CURRENCY",
+          tradeOperation = Buy,
+          tradeAccount = "demo",
+          tradeSecurity = "FOO",
+          tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
+          tradeSignalId = SignalId "Foo" "bar" "baz" }
+        cb (TradeNotification trade)
+
+        step "Sending notifications request"
+        send sock [] (BL.toStrict . encode $ RequestNotifications 2)
+        threadDelay 10000
+
+        step "Reading response"
+        resp <- decode . BL.fromStrict <$> receive sock
+        case resp of
+          Just (ResponseNotifications ns) -> do
+            length ns @=? 3
+            let (TradeNotification newtrade) = head ns
+            let (OrderNotification oid newstate) = ns !! 1
+            orderId @=? oid
+            Executed @=? newstate 
+            trade @=? newtrade 
+          Just _ -> assertFailure "Invalid response"
+          Nothing -> assertFailure "Invalid response"
+
+        step "Sending second notifications request"
+        send sock [] (BL.toStrict . encode $ RequestNotifications 3)
+        threadDelay 10000
+
+        step "Reading response"
+        resp <- decode . BL.fromStrict <$> receive sock
+        case resp of
+          Just (ResponseNotifications ns) -> do
+            0 @=? length ns
+          Just _ -> assertFailure "Invalid response"
+          Nothing -> assertFailure "Invalid response"
+        )))

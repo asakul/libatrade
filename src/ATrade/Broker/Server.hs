@@ -24,6 +24,7 @@ import Control.Monad
 import System.Log.Logger
 
 newtype OrderIdGenerator = IO OrderId
+type PeerId = B.ByteString
 
 data BrokerInterface = BrokerInterface {
   accounts :: [T.Text],
@@ -36,9 +37,9 @@ data BrokerInterface = BrokerInterface {
 data BrokerServerState = BrokerServerState {
   bsSocket :: Socket Router,
   orderToBroker :: M.Map OrderId BrokerInterface,
-  orderMap :: M.Map OrderId B.ByteString, -- Matches 0mq client identities with corresponding orders
-  lastPacket :: M.Map B.ByteString (RequestSqnum, B.ByteString),
-  pendingNotifications :: [(Notification, UTCTime)], -- List of tuples (Order with new state, Time when notification enqueued)
+  orderMap :: M.Map OrderId PeerId, -- Matches 0mq client identities with corresponding orders
+  lastPacket :: M.Map PeerId (RequestSqnum, B.ByteString),
+  pendingNotifications :: M.Map PeerId [Notification],
   brokers :: [BrokerInterface],
   completionMvar :: MVar (),
   orderIdCounter :: OrderId
@@ -57,13 +58,27 @@ startBrokerServer brokers c ep = do
     orderMap = M.empty,
     orderToBroker = M.empty,
     lastPacket = M.empty,
-    pendingNotifications = [],
+    pendingNotifications = M.empty,
     brokers = brokers,
     completionMvar = compMv,
     orderIdCounter = 1
   }
+  mapM_ (\bro -> setNotificationCallback bro (Just $ notificationCallback state)) brokers
 
   BrokerServerHandle <$> forkIO (brokerServerThread state) <*> pure compMv
+
+notificationCallback :: IORef BrokerServerState -> Notification -> IO ()
+notificationCallback state n = do
+  orders <- orderMap <$> readIORef state
+  case M.lookup (notificationOrderId n) orders of
+    Just peerId -> addNotification peerId n
+    Nothing -> warningM "Broker.Server" "Notification: unknown order"
+
+  where
+    addNotification peerId n = atomicModifyIORef' state (\s ->
+      case M.lookup peerId . pendingNotifications $ s of
+        Just ns -> (s { pendingNotifications = M.insert peerId (n : ns) (pendingNotifications s)}, ())
+        Nothing -> (s { pendingNotifications = M.insert peerId [n] (pendingNotifications s)}, ()))
 
 brokerServerThread state = finally brokerServerThread' cleanup
   where
@@ -71,7 +86,7 @@ brokerServerThread state = finally brokerServerThread' cleanup
       sock <- bsSocket <$> readIORef state
       msg <- receiveMulti sock
       case msg of
-        [peerId, _, payload] -> handleMessage payload >>= sendMessage sock peerId
+        [peerId, _, payload] -> handleMessage peerId payload >>= sendMessage sock peerId
         _ -> warningM "Broker.Server" ("Invalid packet received: " ++ show msg)
 
     cleanup = do
@@ -80,16 +95,18 @@ brokerServerThread state = finally brokerServerThread' cleanup
       mv <- completionMvar <$> readIORef state
       putMVar mv ()
 
-    handleMessage :: B.ByteString -> IO BrokerServerResponse
-    handleMessage payload = do
+    handleMessage :: B.ByteString -> B.ByteString -> IO BrokerServerResponse
+    handleMessage peerId payload = do
       bros <- brokers <$> readIORef state
       case decode . BL.fromStrict $ payload of
         Just (RequestSubmitOrder sqnum order) ->
           case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
               oid <- nextOrderId
+              atomicModifyIORef' state (\s -> (s {
+                orderToBroker = M.insert oid bro (orderToBroker s),
+                orderMap = M.insert oid peerId (orderMap s) }, ()))
               submitOrder bro order { orderId = oid }
-              atomicModifyIORef' state (\s -> (s { orderToBroker = M.insert oid bro (orderToBroker s)}, ()))
               return $ ResponseOrderSubmitted oid
 
             Nothing -> return $ ResponseError "Unknown account"
@@ -100,7 +117,13 @@ brokerServerThread state = finally brokerServerThread' cleanup
               cancelOrder bro oid
               return $ ResponseOrderCancelled oid
             Nothing -> return $ ResponseError "Unknown order"
-        Just _ -> return $ ResponseError "Not implemented"
+        Just (RequestNotifications sqnum) -> do
+          maybeNs <- M.lookup peerId . pendingNotifications <$> readIORef state
+          case maybeNs of
+            Just ns -> do
+              atomicModifyIORef' state (\s -> (s { pendingNotifications = M.insert peerId [] (pendingNotifications s)}, ()))
+              return $ ResponseNotifications ns
+            Nothing -> return $ ResponseNotifications []
         Nothing -> return $ ResponseError "Unable to parse request"
 
     sendMessage sock peerId resp = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])

@@ -4,6 +4,7 @@ module ATrade.Broker.Protocol (
   BrokerServerRequest(..),
   BrokerServerResponse(..),
   Notification(..),
+  notificationOrderId,
   RequestSqnum(..)
 ) where
 
@@ -74,6 +75,10 @@ instance ToJSON BrokerServerResponse where
 
 data Notification = OrderNotification OrderId OrderState | TradeNotification Trade
   deriving (Eq, Show)
+
+notificationOrderId :: Notification -> OrderId
+notificationOrderId (OrderNotification oid _) = oid
+notificationOrderId (TradeNotification trade) = tradeOrderId trade
 
 instance FromJSON Notification where
   parseJSON n = withObject "notification" (\obj ->
