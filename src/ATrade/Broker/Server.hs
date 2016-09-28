@@ -92,16 +92,16 @@ brokerServerThread state = finally brokerServerThread' cleanup
             Nothing -> return (peerId, ResponseError "Unknown account")
         Just (RequestCancelOrder sqnum oid) -> do
           m <- orderToBroker <$> readIORef state
-          case M.lookup oid m of 
+          case M.lookup oid m of
             Just bro -> do
               cancelOrder bro oid
               return (peerId, ResponseOrderCancelled oid)
             Nothing -> return (peerId, ResponseError "Unknown order")
         Just _ -> return (peerId, ResponseError "Not implemented")
-        Nothing -> error "foobar"
+        Nothing -> return (peerId, ResponseError "Unable to parse request")
     handleMessage x = do
       warningM "Broker.Server" ("Invalid packet received: " ++ show x)
-      error "foobar"
+      return (B.empty, ResponseError "Invalid packet structure")
 
     sendMessage sock (peerId, resp) = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])
 

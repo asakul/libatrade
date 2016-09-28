@@ -10,6 +10,7 @@ import Test.Tasty.QuickCheck as QC
 import Test.Tasty.HUnit
 
 import ATrade.Types
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import ATrade.Broker.Server
 import ATrade.Broker.Protocol
@@ -77,7 +78,8 @@ unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerSubmitOrder
   , testBrokerServerSubmitOrderToUnknownAccount
   , testBrokerServerCancelOrder
-  , testBrokerServerCancelUnknownOrder ]
+  , testBrokerServerCancelUnknownOrder
+  , testBrokerServerCorruptedPacket ]
 
 testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
   ep <- toText <$> UV4.nextRandom
@@ -191,3 +193,28 @@ testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancell
           Just _ -> assertFailure "Invalid response"
           Nothing -> assertFailure "Invalid response"
         )))
+
+
+testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet" $
+  \step -> withContext (\ctx -> do
+    step "Setup"
+    ep <- makeEndpoint
+    (mockBroker, broState) <- mkMockBroker ["demo"]
+    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+      withSocket ctx Req (\sock -> do
+        step "Connecting"
+        connect sock (T.unpack ep)
+
+        step "Sending request"
+        send sock [] (corrupt . BL.toStrict . encode $ RequestSubmitOrder 1 defaultOrder)
+        threadDelay 10000
+
+        step "Reading response"
+        resp <- decode . BL.fromStrict <$> receive sock
+        case resp of
+          Just (ResponseError _) -> return ()
+          Just _ -> assertFailure "Invalid response"
+          Nothing -> assertFailure "Invalid response"
+        )))
+  where
+    corrupt = B.drop 5
