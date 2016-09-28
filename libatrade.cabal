@@ -17,6 +17,7 @@ library
   hs-source-dirs:      src
   ghc-options:         -Wincomplete-patterns
   exposed-modules:     ATrade.Types
+                     , ATrade.QuoteSource.Client
                      , ATrade.QuoteSource.Server
                      , ATrade.Broker.Protocol
                      , ATrade.Broker.Server
@@ -77,6 +78,7 @@ test-suite libatrade-test
                      , MockBroker
                      , TestBrokerProtocol
                      , TestBrokerServer
+                     , TestQuoteSourceClient
                      , TestQuoteSourceServer
                      , TestTypes
 

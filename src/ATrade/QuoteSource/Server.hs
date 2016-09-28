@@ -9,6 +9,7 @@ import Control.Concurrent.BoundedChan
 import Control.Concurrent hiding (readChan, writeChan)
 import Control.Exception
 import Control.Monad
+import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as BL
 import Data.List.NonEmpty hiding (map)
 import System.Log.Logger
@@ -39,10 +40,10 @@ serverThread state = do
           sendMulti (outSocket state) $ fromList . map BL.toStrict $ serializeTick tick
           serverThread'
 
-startQuoteSourceServer :: BoundedChan (Maybe Tick) -> Context -> String -> IO QuoteSourceServer
+startQuoteSourceServer :: BoundedChan (Maybe Tick) -> Context -> T.Text -> IO QuoteSourceServer
 startQuoteSourceServer chan c ep = do
   sock <- socket c Pub
-  bind sock ep
+  bind sock $ T.unpack ep
   tid <- myThreadId
   mv <- newEmptyMVar
   let state = QuoteSourceServerState {
