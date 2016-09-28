@@ -69,7 +69,10 @@ brokerServerThread state = finally brokerServerThread' cleanup
   where
     brokerServerThread' = forever $ do
       sock <- bsSocket <$> readIORef state
-      receiveMulti sock >>= handleMessage >>= sendMessage sock
+      msg <- receiveMulti sock
+      case msg of
+        [peerId, _, payload] -> handleMessage payload >>= sendMessage sock peerId
+        _ -> warningM "Broker.Server" ("Invalid packet received: " ++ show msg)
 
     cleanup = do
       sock <- bsSocket <$> readIORef state
@@ -77,8 +80,8 @@ brokerServerThread state = finally brokerServerThread' cleanup
       mv <- completionMvar <$> readIORef state
       putMVar mv ()
 
-    handleMessage :: [B.ByteString] -> IO (B.ByteString, BrokerServerResponse)
-    handleMessage [peerId, _, payload] = do
+    handleMessage :: B.ByteString -> IO BrokerServerResponse
+    handleMessage payload = do
       bros <- brokers <$> readIORef state
       case decode . BL.fromStrict $ payload of
         Just (RequestSubmitOrder sqnum order) ->
@@ -87,23 +90,20 @@ brokerServerThread state = finally brokerServerThread' cleanup
               oid <- nextOrderId
               submitOrder bro order { orderId = oid }
               atomicModifyIORef' state (\s -> (s { orderToBroker = M.insert oid bro (orderToBroker s)}, ()))
-              return (peerId, ResponseOrderSubmitted oid)
+              return $ ResponseOrderSubmitted oid
 
-            Nothing -> return (peerId, ResponseError "Unknown account")
+            Nothing -> return $ ResponseError "Unknown account"
         Just (RequestCancelOrder sqnum oid) -> do
           m <- orderToBroker <$> readIORef state
           case M.lookup oid m of
             Just bro -> do
               cancelOrder bro oid
-              return (peerId, ResponseOrderCancelled oid)
-            Nothing -> return (peerId, ResponseError "Unknown order")
-        Just _ -> return (peerId, ResponseError "Not implemented")
-        Nothing -> return (peerId, ResponseError "Unable to parse request")
-    handleMessage x = do
-      warningM "Broker.Server" ("Invalid packet received: " ++ show x)
-      return (B.empty, ResponseError "Invalid packet structure")
+              return $ ResponseOrderCancelled oid
+            Nothing -> return $ ResponseError "Unknown order"
+        Just _ -> return $ ResponseError "Not implemented"
+        Nothing -> return $ ResponseError "Unable to parse request"
 
-    sendMessage sock (peerId, resp) = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])
+    sendMessage sock peerId resp = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])
 
     findBrokerForAccount account = L.find (L.elem account . accounts)
     nextOrderId = atomicModifyIORef' state (\s -> ( s {orderIdCounter = 1 + orderIdCounter s}, orderIdCounter s))
