@@ -3,7 +3,8 @@
 module ATrade.Broker.Protocol (
   BrokerServerRequest(..),
   BrokerServerResponse(..),
-  Notification(..)
+  Notification(..),
+  RequestSqnum(..)
 ) where
 
 import qualified Data.HashMap.Strict as HM

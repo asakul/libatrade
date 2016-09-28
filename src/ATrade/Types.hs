@@ -236,8 +236,8 @@ type OrderId = Integer
 
 data Order = Order {
   orderId :: OrderId,
-  orderAccountId :: String,
-  orderSecurity :: String,
+  orderAccountId :: T.Text,
+  orderSecurity :: T.Text,
   orderPrice :: OrderPrice,
   orderQuantity :: Integer,
   orderExecutedQuantity :: Integer,
@@ -278,10 +278,10 @@ data Trade = Trade {
   tradePrice :: Decimal,
   tradeQuantity :: Integer,
   tradeVolume :: Decimal,
-  tradeVolumeCurrency :: String,
+  tradeVolumeCurrency :: T.Text,
   tradeOperation :: Operation,
-  tradeAccount :: String,
-  tradeSecurity :: String,
+  tradeAccount :: T.Text,
+  tradeSecurity :: T.Text,
   tradeTimestamp :: UTCTime,
   tradeSignalId :: SignalId }
   deriving (Show, Eq)
