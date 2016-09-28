@@ -29,7 +29,7 @@ data BrokerInterface = BrokerInterface {
   accounts :: [T.Text],
   setNotificationCallback :: Maybe (Notification -> IO()) -> IO (),
   submitOrder :: Order -> IO (),
-  cancelOrder :: OrderId -> IO (),
+  cancelOrder :: OrderId -> IO Bool,
   stopBroker :: IO ()
 }
 

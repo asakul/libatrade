@@ -46,12 +46,12 @@ mockSubmitOrder state order = do
   where
     submittedOrder = order { orderState = Submitted }
 
-mockCancelOrder :: IORef MockBrokerState -> OrderId -> IO ()
+mockCancelOrder :: IORef MockBrokerState -> OrderId -> IO Bool
 mockCancelOrder state oid = do
   ors <- orders <$> readIORef state
   case L.find (\o -> orderId o == oid) ors of
-    Just order -> atomicModifyIORef' state (\s -> (s { cancelledOrders = order : cancelledOrders s}, ()))
-    Nothing -> return ()
+    Just order -> atomicModifyIORef' state (\s -> (s { cancelledOrders = order : cancelledOrders s}, True))
+    Nothing -> return False
 
 mockStopBroker :: IORef MockBrokerState -> IO ()
 mockStopBroker state = return ()
@@ -76,7 +76,8 @@ mkMockBroker accs = do
 unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerSubmitOrder
   , testBrokerServerSubmitOrderToUnknownAccount
-  , testBrokerServerCancelOrder ]
+  , testBrokerServerCancelOrder
+  , testBrokerServerCancelUnknownOrder ]
 
 testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
   ep <- toText <$> UV4.nextRandom
@@ -176,5 +177,35 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
         resp <- decode . BL.fromStrict <$> receive sock
         case resp of
           Just (ResponseOrderCancelled _) -> return ()
+          Just _ -> assertFailure "Invalid response"
+          Nothing -> assertFailure "Invalid response"
+        )))
+
+testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancellation: error if order is unknown" $
+  \step -> withContext (\ctx -> do
+    step "Setup"
+    ep <- makeEndpoint
+    (mockBroker, broState) <- mkMockBroker ["demo"]
+    let order = mkOrder {
+      orderAccountId = "demo",
+      orderSecurity = "FOO",
+      orderPrice = Market,
+      orderQuantity = 10,
+      orderOperation = Buy
+    }
+    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+      withSocket ctx Req (\sock -> do
+        connectAndSendOrder step sock order ep
+        receive sock
+
+        step "Sending order cancellation request"
+        send sock [] (BL.toStrict . encode $ RequestCancelOrder 2 100)
+        threadDelay 10000
+
+        step "Reading response"
+        resp <- decode . BL.fromStrict <$> receive sock
+        case resp of
+          Just (ResponseError _) -> return ()
+          Just _ -> assertFailure "Invalid response"
           Nothing -> assertFailure "Invalid response"
         )))
