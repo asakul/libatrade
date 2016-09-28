@@ -47,6 +47,7 @@ instance ToJSON BrokerServerRequest where
 data BrokerServerResponse = ResponseOrderSubmitted OrderId
   | ResponseOrderCancelled OrderId
   | ResponseNotifications [Notification]
+  | ResponseError T.Text
   deriving (Eq, Show)
 
 instance FromJSON BrokerServerResponse where
@@ -59,12 +60,16 @@ instance FromJSON BrokerServerResponse where
         return $ ResponseOrderCancelled oid
        | HM.member "notifications" obj -> do
         notifications <- obj .: "notifications"
-        ResponseNotifications <$> parseJSON notifications)
+        ResponseNotifications <$> parseJSON notifications
+       | HM.member "error" obj -> do
+        error <- obj .: "error"
+        ResponseError <$> parseJSON error)
 
 instance ToJSON BrokerServerResponse where
   toJSON (ResponseOrderSubmitted oid) = object [ "order-id" .= oid ]
   toJSON (ResponseOrderCancelled oid) = object [ "order-cancelled" .= oid ]
   toJSON (ResponseNotifications notifications) = object [ "notifications" .= notifications ]
+  toJSON (ResponseError errorMessage) = object [ "error" .= errorMessage ]
 
 data Notification = OrderNotification OrderId OrderState | TradeNotification Trade
   deriving (Eq, Show)
