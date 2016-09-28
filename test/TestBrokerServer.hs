@@ -77,22 +77,18 @@ testBrokerServerSubmitOrder = testCase "Broker Server submits order" $ withConte
   uid <- toText <$> UV4.nextRandom
   (mockBroker, broState) <- mkMockBroker ["demo"]
   let ep = "inproc://brokerserver" `T.append` uid
-  let order = Order {
-    orderId = 0,
+  let order = mkOrder {
     orderAccountId = "demo",
     orderSecurity = "FOO",
     orderPrice = Market,
     orderQuantity = 10,
-    orderExecutedQuantity = 0,
-    orderOperation = Buy,
-    orderState = Unsubmitted,
-    orderSignalId = SignalId "" "" ""
+    orderOperation = Buy
   }
   bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS -> 
     withSocket ctx Req (\sock -> do
       connect sock (T.unpack ep)
       send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 order)
-      threadDelay 100000
+      threadDelay 10000
       s <- readIORef broState
       (length . orders) s @?= 1
       )))

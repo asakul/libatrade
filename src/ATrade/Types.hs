@@ -10,6 +10,7 @@ module ATrade.Types (
   Operation(..),
   OrderState(..),
   Order(..),
+  mkOrder,
   Trade(..),
   OrderId(..)
 ) where
@@ -245,6 +246,16 @@ data Order = Order {
   orderState :: OrderState,
   orderSignalId :: SignalId }
   deriving (Show, Eq)
+
+mkOrder = Order { orderId = 0,
+  orderAccountId = "",
+  orderSecurity = "",
+  orderPrice = Market,
+  orderQuantity = 0,
+  orderExecutedQuantity = 0,
+  orderOperation = Buy,
+  orderState = Unsubmitted,
+  orderSignalId = SignalId "" "" "" }
 
 instance FromJSON Order where
   parseJSON (Object v) = Order      <$>
