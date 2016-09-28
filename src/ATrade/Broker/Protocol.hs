@@ -35,6 +35,7 @@ instance FromJSON BrokerServerRequest where
           orderId <- obj .: "cancel-order"
           RequestCancelOrder sqnum <$> parseJSON orderId
         | HM.member "request-notifications" obj = return (RequestNotifications sqnum)
+      parseRequest _ _ = fail "Invalid request object"
 
 instance ToJSON BrokerServerRequest where
   toJSON (RequestSubmitOrder sqnum order) = object ["request-sqnum" .= sqnum,
@@ -87,6 +88,7 @@ instance FromJSON Notification where
           ns <- os .: "new-state"
           return $ OrderNotification oid ns) v
         Nothing -> fail "Should be order-state"
+      parseOrder _ = fail "Unable to parse order state"
 
 instance ToJSON Notification where
   toJSON (OrderNotification oid newState) = object ["order-state" .= object [ "order-id" .= oid, "new-state" .= newState] ]
