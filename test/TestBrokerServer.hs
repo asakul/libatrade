@@ -14,6 +14,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import ATrade.Broker.Server
 import ATrade.Broker.Protocol
+import ATrade.Util
 import qualified Data.Text as T
 import Control.Monad
 import Control.Monad.Loops
@@ -39,7 +40,7 @@ data MockBrokerState = MockBrokerState {
 
 mockSubmitOrder :: IORef MockBrokerState -> Order -> IO ()
 mockSubmitOrder state order = do
-  atomicModifyIORef' state (\s -> (s { orders = submittedOrder : orders s }, ()))
+  atomicMapIORef state (\s -> s { orders = submittedOrder : orders s })
   maybeCb <- notificationCallback <$> readIORef state
   case maybeCb of
     Just cb -> cb $ OrderNotification (orderId order) Submitted
@@ -67,7 +68,7 @@ mkMockBroker accs = do
 
   return (BrokerInterface {
     accounts = accs,
-    setNotificationCallback = \cb -> atomicModifyIORef' state (\s -> (s { notificationCallback = cb }, ())),
+    setNotificationCallback = \cb -> atomicMapIORef state (\s -> s { notificationCallback = cb }),
     submitOrder = mockSubmitOrder state,
     cancelOrder = mockCancelOrder state,
     stopBroker = mockStopBroker state

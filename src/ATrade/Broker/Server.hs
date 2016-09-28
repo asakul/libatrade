@@ -22,6 +22,7 @@ import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import System.Log.Logger
+import ATrade.Util
 
 newtype OrderIdGenerator = IO OrderId
 type PeerId = B.ByteString
@@ -75,10 +76,10 @@ notificationCallback state n = do
     Nothing -> warningM "Broker.Server" "Notification: unknown order"
 
   where
-    addNotification peerId n = atomicModifyIORef' state (\s ->
+    addNotification peerId n = atomicMapIORef state (\s ->
       case M.lookup peerId . pendingNotifications $ s of
-        Just ns -> (s { pendingNotifications = M.insert peerId (n : ns) (pendingNotifications s)}, ())
-        Nothing -> (s { pendingNotifications = M.insert peerId [n] (pendingNotifications s)}, ()))
+        Just ns -> s { pendingNotifications = M.insert peerId (n : ns) (pendingNotifications s)}
+        Nothing -> s { pendingNotifications = M.insert peerId [n] (pendingNotifications s)})
 
 brokerServerThread state = finally brokerServerThread' cleanup
   where
@@ -103,9 +104,9 @@ brokerServerThread state = finally brokerServerThread' cleanup
           case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
               oid <- nextOrderId
-              atomicModifyIORef' state (\s -> (s {
+              atomicMapIORef state (\s -> s {
                 orderToBroker = M.insert oid bro (orderToBroker s),
-                orderMap = M.insert oid peerId (orderMap s) }, ()))
+                orderMap = M.insert oid peerId (orderMap s) })
               submitOrder bro order { orderId = oid }
               return $ ResponseOrderSubmitted oid
 
@@ -121,7 +122,7 @@ brokerServerThread state = finally brokerServerThread' cleanup
           maybeNs <- M.lookup peerId . pendingNotifications <$> readIORef state
           case maybeNs of
             Just ns -> do
-              atomicModifyIORef' state (\s -> (s { pendingNotifications = M.insert peerId [] (pendingNotifications s)}, ()))
+              atomicMapIORef state (\s -> s { pendingNotifications = M.insert peerId [] (pendingNotifications s)})
               return $ ResponseNotifications ns
             Nothing -> return $ ResponseNotifications []
         Nothing -> return $ ResponseError "Unable to parse request"
