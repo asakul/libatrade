@@ -14,7 +14,7 @@ import ATrade.Types
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import ATrade.Broker.Client
-import ATrade.Broker.Server hiding (submitOrder)
+import ATrade.Broker.Server hiding (submitOrder, cancelOrder)
 import ATrade.Broker.Protocol
 import ATrade.Util
 import qualified Data.Text as T
@@ -35,7 +35,10 @@ import Data.UUID as U
 import Data.UUID.V4 as UV4
 import MockBroker
 
-unitTests = testGroup "Broker.Client" [testBrokerClientStartStop]
+unitTests = testGroup "Broker.Client" [
+    testBrokerClientStartStop
+  , testBrokerClientCancelOrder
+  ]
 
 makeEndpoint = do
   uid <- toText <$> UV4.nextRandom
@@ -58,4 +61,19 @@ testBrokerClientStartStop = testCase "Broker client: submit order" $ withContext
       case oid of
         Left err -> assertFailure "Invalid response"
         Right _ -> return ())))
+
+testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" $ withContext (\ctx -> do
+  ep <- makeEndpoint
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+  bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    bracket (startBrokerClient ctx ep) stopBrokerClient (\broC -> do
+      maybeOid <- submitOrder broC defaultOrder
+      case maybeOid of
+        Left err -> assertFailure "Invalid response"
+        Right oid -> do
+          rc <- cancelOrder broC oid
+          case rc of
+            Left err -> assertFailure "Invalid response"
+            Right _ -> return()
+          )))
 

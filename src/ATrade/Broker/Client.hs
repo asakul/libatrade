@@ -39,13 +39,14 @@ brokerClientThread ctx ep cmd resp comp = do
   finally (brokerClientThread' sock) (cleanup sock)
   where
     cleanup sock = close sock >> putMVar comp ()
-    brokerClientThread' sock = forever $ do
-      request <- readMVar cmd
-      send sock [] (BL.toStrict $ encode request)
-      maybeResponse <- decode . BL.fromStrict <$> receive sock
-      case maybeResponse of
-        Just response -> putMVar resp response
-        Nothing -> putMVar resp (ResponseError "Unable to decode response")
+    brokerClientThread' sock = do
+      forever $ do
+        request <- takeMVar cmd
+        send sock [] (BL.toStrict $ encode request)
+        maybeResponse <- decode . BL.fromStrict <$> receive sock
+        case maybeResponse of
+          Just response -> putMVar resp response
+          Nothing -> putMVar resp (ResponseError "Unable to decode response")
 
 startBrokerClient :: Context -> T.Text -> IO BrokerClientHandle
 startBrokerClient ctx endpoint = do
@@ -73,11 +74,20 @@ bcSubmitOrder :: IORef Int64 -> MVar BrokerServerRequest -> MVar BrokerServerRes
 bcSubmitOrder idCounter cmdVar respVar order = do
   sqnum <- nextId idCounter
   putMVar cmdVar (RequestSubmitOrder sqnum order)
-  resp <- readMVar respVar
+  resp <- takeMVar respVar
   case resp of
     (ResponseOrderSubmitted oid) -> return $ Right oid
+    _ -> return $ Left "Unknown error"
     (ResponseError msg) -> return $ Left msg
     
 
-bcCancelOrder idCounter cmdVar respVar orderId = undefined
+bcCancelOrder idCounter cmdVar respVar orderId = do
+  sqnum <- nextId idCounter
+  putMVar cmdVar (RequestCancelOrder sqnum orderId)
+  resp <- takeMVar respVar
+  case resp of
+    (ResponseOrderCancelled oid) -> return $ Right ()
+    _ -> return $ Left "Unknown error"
+    (ResponseError msg) -> return $ Left msg
+
 
