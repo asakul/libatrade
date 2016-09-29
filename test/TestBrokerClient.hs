@@ -1,7 +1,7 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
-module TestBrokerServer (
+module TestBrokerClient (
   unitTests
 ) where
 
@@ -13,7 +13,8 @@ import Test.Tasty.HUnit
 import ATrade.Types
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import ATrade.Broker.Server
+import ATrade.Broker.Client
+import ATrade.Broker.Server hiding (submitOrder)
 import ATrade.Broker.Protocol
 import ATrade.Util
 import qualified Data.Text as T
@@ -34,7 +35,7 @@ import Data.UUID as U
 import Data.UUID.V4 as UV4
 import MockBroker
 
-unitTests = testGroup "Broker.Client" []
+unitTests = testGroup "Broker.Client" [testBrokerClientStartStop]
 
 makeEndpoint = do
   uid <- toText <$> UV4.nextRandom
@@ -48,11 +49,13 @@ defaultOrder = mkOrder {
     orderOperation = Buy
   }
 
-testBrokerClientStartStop = testCase "Broker client starts and stops" $ withContext (\ctx -> do
+testBrokerClientStartStop = testCase "Broker client: submit order" $ withContext (\ctx -> do
   ep <- makeEndpoint
   (mockBroker, broState) <- mkMockBroker ["demo"]
   bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
-    bracket (startBrokerClient ctx ep) stopBrokerClient (\broC ->
+    bracket (startBrokerClient ctx ep) stopBrokerClient (\broC -> do
       oid <- submitOrder broC defaultOrder
-  )))
+      case oid of
+        Left err -> assertFailure "Invalid response"
+        Right _ -> return ())))
 

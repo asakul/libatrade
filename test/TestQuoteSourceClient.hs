@@ -52,7 +52,9 @@ testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\c
           timestamp = UTCTime (fromGregorian 2016 9 27) 16000,
           value = 1000,
           volume = 1}
+      yield
       writeChan chan (Just tick)
+      yield
       recvdTick <- readChan clientChan
       tick @=? recvdTick)))
   

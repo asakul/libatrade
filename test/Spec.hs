@@ -1,5 +1,6 @@
 
 import qualified TestTypes
+import qualified TestBrokerClient
 import qualified TestBrokerProtocol
 import qualified TestBrokerServer
 import qualified TestQuoteSourceClient
@@ -14,7 +15,9 @@ properties :: TestTree
 properties = testGroup "Properties" [TestTypes.properties, TestBrokerProtocol.properties]
 
 unitTests :: TestTree
-unitTests = testGroup "Unit-tests" [TestQuoteSourceClient.unitTests
+unitTests = testGroup "Unit-tests" [
+    TestQuoteSourceClient.unitTests
   , TestQuoteSourceServer.unitTests
-  , TestBrokerServer.unitTests]
+  , TestBrokerServer.unitTests
+  , TestBrokerClient.unitTests]
 
