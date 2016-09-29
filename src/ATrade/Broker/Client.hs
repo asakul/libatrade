@@ -4,7 +4,8 @@ module ATrade.Broker.Client (
   startBrokerClient,
   stopBrokerClient,
   submitOrder,
-  cancelOrder
+  cancelOrder,
+  getNotifications
 ) where
 
 import ATrade.Types
@@ -29,6 +30,7 @@ data BrokerClientHandle = BrokerClientHandle {
   completionMvar :: MVar (),
   submitOrder :: Order -> IO (Either T.Text OrderId),
   cancelOrder :: OrderId -> IO (Either T.Text ()),
+  getNotifications :: IO (Either T.Text [Notification]),
   cmdVar :: MVar BrokerServerRequest,
   respVar :: MVar BrokerServerResponse
 }
@@ -61,6 +63,7 @@ startBrokerClient ctx endpoint = do
     completionMvar = compMv,
     submitOrder = bcSubmitOrder idCounter cmdVar respVar,
     cancelOrder = bcCancelOrder idCounter cmdVar respVar,
+    getNotifications = bcGetNotifications idCounter cmdVar respVar,
     cmdVar = cmdVar,
     respVar = respVar
   }
@@ -79,8 +82,8 @@ bcSubmitOrder idCounter cmdVar respVar order = do
     (ResponseOrderSubmitted oid) -> return $ Right oid
     _ -> return $ Left "Unknown error"
     (ResponseError msg) -> return $ Left msg
-    
 
+bcCancelOrder :: IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> OrderId -> IO (Either T.Text ())
 bcCancelOrder idCounter cmdVar respVar orderId = do
   sqnum <- nextId idCounter
   putMVar cmdVar (RequestCancelOrder sqnum orderId)
@@ -90,4 +93,12 @@ bcCancelOrder idCounter cmdVar respVar orderId = do
     _ -> return $ Left "Unknown error"
     (ResponseError msg) -> return $ Left msg
 
-
+bcGetNotifications :: IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> IO (Either T.Text [Notification])
+bcGetNotifications idCounter cmdVar respVar = do
+  sqnum <- nextId idCounter
+  putMVar cmdVar (RequestNotifications sqnum)
+  resp <- takeMVar respVar
+  case resp of
+    (ResponseNotifications ns) -> return $ Right ns
+    _ -> return $ Left "Unknown error"
+    (ResponseError msg) -> return $ Left msg

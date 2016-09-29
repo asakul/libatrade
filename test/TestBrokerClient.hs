@@ -38,6 +38,7 @@ import MockBroker
 unitTests = testGroup "Broker.Client" [
     testBrokerClientStartStop
   , testBrokerClientCancelOrder
+  , testBrokerClientGetNotifications
   ]
 
 makeEndpoint = do
@@ -75,5 +76,20 @@ testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" 
           case rc of
             Left err -> assertFailure "Invalid response"
             Right _ -> return()
+          )))
+
+testBrokerClientGetNotifications = testCase "Broker client: get notifications" $ withContext (\ctx -> do
+  ep <- makeEndpoint
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+  bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    bracket (startBrokerClient ctx ep) stopBrokerClient (\broC -> do
+      maybeOid <- submitOrder broC defaultOrder
+      case maybeOid of
+        Left err -> assertFailure "Invalid response"
+        Right oid -> do
+          maybeNs <- getNotifications broC
+          case maybeNs of
+            Left err -> assertFailure "Invalid response"
+            Right ns -> 1 @=? length ns
           )))
 
