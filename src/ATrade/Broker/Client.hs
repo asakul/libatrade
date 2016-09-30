@@ -80,8 +80,8 @@ bcSubmitOrder idCounter cmdVar respVar order = do
   resp <- takeMVar respVar
   case resp of
     (ResponseOrderSubmitted oid) -> return $ Right oid
-    _ -> return $ Left "Unknown error"
     (ResponseError msg) -> return $ Left msg
+    _ -> return $ Left "Unknown error"
 
 bcCancelOrder :: IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> OrderId -> IO (Either T.Text ())
 bcCancelOrder idCounter cmdVar respVar orderId = do
@@ -90,8 +90,8 @@ bcCancelOrder idCounter cmdVar respVar orderId = do
   resp <- takeMVar respVar
   case resp of
     (ResponseOrderCancelled oid) -> return $ Right ()
-    _ -> return $ Left "Unknown error"
     (ResponseError msg) -> return $ Left msg
+    _ -> return $ Left "Unknown error"
 
 bcGetNotifications :: IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> IO (Either T.Text [Notification])
 bcGetNotifications idCounter cmdVar respVar = do
@@ -100,5 +100,5 @@ bcGetNotifications idCounter cmdVar respVar = do
   resp <- takeMVar respVar
   case resp of
     (ResponseNotifications ns) -> return $ Right ns
-    _ -> return $ Left "Unknown error"
     (ResponseError msg) -> return $ Left msg
+    _ -> return $ Left "Unknown error"
