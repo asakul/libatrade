@@ -9,10 +9,12 @@ import ATrade.Types
 import Control.Concurrent hiding (readChan, writeChan)
 import Control.Concurrent.BoundedChan
 import Control.Concurrent.MVar
+import Control.Monad
 import Control.Exception
 import Data.List.NonEmpty
 import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.List as L
 import Data.Text.Encoding
 import System.ZMQ4
 import System.Log.Logger
@@ -33,10 +35,12 @@ startQuoteSourceClient chan tickers ctx endpoint = do
   return QuoteSourceClientHandle { tid = tid, completionMvar = compMv }
   where
     clientThread sock = do
-      rawTick <- fmap BL.fromStrict <$> receiveMulti sock
-      case deserializeTick rawTick of
-        Just tick -> writeChan chan tick
-        Nothing -> warningM "QuoteSource.Client" "Error: can't deserialize tick"
+      evs <- poll 200 [Sock sock [In] Nothing] 
+      when ((L.length . L.head) evs > 0) $ do
+        rawTick <- fmap BL.fromStrict <$> receiveMulti sock
+        case deserializeTick rawTick of
+          Just tick -> writeChan chan tick
+          Nothing -> warningM "QuoteSource.Client" "Error: can't deserialize tick"
     cleanup compMv sock = close sock >> putMVar compMv ()
 
 stopQuoteSourceClient :: QuoteSourceClientHandle -> IO ()
