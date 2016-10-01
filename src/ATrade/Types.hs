@@ -71,11 +71,11 @@ instance Enum DataType where
     | otherwise = Unknown
 
 data Tick = Tick {
-  security :: T.Text,
-  datatype :: DataType,
-  timestamp :: UTCTime,
-  value :: Decimal,
-  volume :: Integer
+  security :: !T.Text,
+  datatype :: !DataType,
+  timestamp :: !UTCTime,
+  value :: !Decimal,
+  volume :: !Integer
 } deriving (Show, Eq)
 
 serializeTick :: Tick -> [ByteString]
