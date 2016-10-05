@@ -34,7 +34,7 @@ startQuoteSourceClient chan tickers ctx endpoint = do
     finally (clientThread sock) (cleanup compMv sock)
   return QuoteSourceClientHandle { tid = tid, completionMvar = compMv }
   where
-    clientThread sock = do
+    clientThread sock = forever $ do
       evs <- poll 200 [Sock sock [In] Nothing] 
       when ((L.length . L.head) evs > 0) $ do
         rawTick <- fmap BL.fromStrict <$> receiveMulti sock
