@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
 
 module ATrade.Types (
+  TickerId,
   Tick(..),
   DataType(..),
   serializeTick,
@@ -31,6 +32,8 @@ import Data.Text as T
 import Data.Text.Encoding as E
 import Data.Time.Clock
 import Data.Word
+
+type TickerId = T.Text
 
 data DataType = Unknown
   | Price
