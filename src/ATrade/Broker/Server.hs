@@ -158,7 +158,7 @@ brokerServerThread state = finally brokerServerThread' cleanup
           case maybeNs of
             Just ns -> do
               atomicMapIORef state (\s -> s { pendingNotifications = M.insert peerId [] (pendingNotifications s)})
-              return $ ResponseNotifications ns
+              return $ ResponseNotifications . L.reverse $ ns
             Nothing -> return $ ResponseNotifications []
 
     sendMessage sock peerId resp = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])
