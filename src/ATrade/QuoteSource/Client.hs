@@ -58,7 +58,7 @@ startQuoteSourceClient chan tickers ctx endpoint = do
     notTimeout ts = do
       now <- getCurrentTime
       heartbeatTs <- readIORef ts
-      return $ diffUTCTime now heartbeatTs < 10
+      return $ diffUTCTime now heartbeatTs < 30
 
     cleanup compMv = putMVar compMv ()
 
