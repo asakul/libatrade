@@ -22,7 +22,8 @@ data QuoteSourceServer = QuoteSourceServerState {
   outSocket :: Socket Pub,
   tickChannel :: BoundedChan QuoteSourceServerData,
   completionMvar :: MVar (),
-  serverThreadId :: ThreadId
+  serverThreadId :: ThreadId,
+  heartbeatThreadId :: ThreadId
 }
 
 data QuoteSourceServerData = QSSTick Tick | QSSHeartbeat | QSSKill
@@ -53,17 +54,22 @@ startQuoteSourceServer chan c ep = do
   sock <- socket c Pub
   bind sock $ T.unpack ep
   tid <- myThreadId
+  hbTid <- forkIO $ forever $ do
+    threadDelay 1000000
+    writeChan chan QSSHeartbeat
+    
   mv <- newEmptyMVar
   let state = QuoteSourceServerState {
     ctx = c,
     outSocket = sock,
     tickChannel = chan,
     completionMvar = mv,
-    serverThreadId = tid
+    serverThreadId = tid,
+    heartbeatThreadId = hbTid
   }
   stid <- forkIO $ serverThread state
   return $ state { serverThreadId = stid }
 
 stopQuoteSourceServer :: QuoteSourceServer -> IO ()
-stopQuoteSourceServer server = writeChan (tickChannel server) QSSKill >> readMVar (completionMvar server)
+stopQuoteSourceServer server = killThread (heartbeatThreadId server) >> writeChan (tickChannel server) QSSKill >> readMVar (completionMvar server)
 

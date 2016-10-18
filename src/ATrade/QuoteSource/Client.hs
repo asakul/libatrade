@@ -43,6 +43,8 @@ startQuoteSourceClient chan tickers ctx endpoint = do
       mapM_ (\t -> subscribe sock $ encodeUtf8 t) tickers
       subscribe sock $ B8.pack "SYSTEM#HEARTBEAT"
 
+      now <- getCurrentTime
+      writeIORef lastHeartbeat now
       whileM_ (notTimeout lastHeartbeat) $ do
         evs <- poll 200 [Sock sock [In] Nothing] 
         when ((L.length . L.head) evs > 0) $ do
@@ -53,7 +55,8 @@ startQuoteSourceClient chan tickers ctx endpoint = do
             then writeIORef lastHeartbeat now
             else case deserializeTick rawTick of
               Just tick -> writeChan chan tick
-              Nothing -> warningM "QuoteSource.Client" "Error: can't deserialize tick")
+              Nothing -> warningM "QuoteSource.Client" "Error: can't deserialize tick"
+      debugM "QuoteSource.Client" "Heartbeat timeout")
 
     notTimeout ts = do
       now <- getCurrentTime

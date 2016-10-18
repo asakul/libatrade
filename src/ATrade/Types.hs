@@ -3,6 +3,7 @@
 module ATrade.Types (
   TickerId,
   Tick(..),
+  Bar(..),
   DataType(..),
   serializeTick,
   deserializeTick,
@@ -135,6 +136,16 @@ deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
         r = toInteger nanopart % 1000000000
 
 deserializeTick _ = Nothing
+
+data Bar = Bar {
+  barSecurity :: !T.Text,
+  barTimestamp :: !UTCTime,
+  barOpen :: !Decimal,
+  barHigh :: !Decimal,
+  barLow :: !Decimal,
+  barClose :: !Decimal,
+  barVolume :: !Integer
+} deriving (Show, Eq)
 
 data SignalId = SignalId {
   strategyId :: T.Text,
