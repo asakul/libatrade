@@ -227,8 +227,8 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
         case resp of
           Just (ResponseNotifications ns) -> do
             length ns @=? 3
-            let (TradeNotification newtrade) = head ns
             let (OrderNotification oid newstate) = ns !! 1
+            let (TradeNotification newtrade) = ns !! 2
             orderId @=? oid
             Executed @=? newstate
             trade @=? newtrade
