@@ -7,7 +7,8 @@ module ATrade.QuoteSource.Client (
 
 import ATrade.Types
 import Control.Concurrent hiding (readChan, writeChan)
-import Control.Concurrent.BoundedChan
+import Control.Concurrent.STM
+import Control.Concurrent.STM.TBQueue
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Loops
@@ -32,7 +33,7 @@ data QuoteSourceClientHandle = QuoteSourceClientHandle {
   killMVar :: MVar ()
 }
 
-startQuoteSourceClient :: BoundedChan Tick -> [T.Text] -> Context -> T.Text -> IO QuoteSourceClientHandle
+startQuoteSourceClient :: TBQueue Tick -> [T.Text] -> Context -> T.Text -> IO QuoteSourceClientHandle
 startQuoteSourceClient chan tickers ctx endpoint = do
   compMv <- newEmptyMVar
   killMv <- newEmptyMVar
@@ -57,7 +58,7 @@ startQuoteSourceClient chan tickers ctx endpoint = do
           if headMay rawTick == Just "SYSTEM#HEARTBEAT"
             then writeIORef lastHeartbeat now
             else case deserializeTick rawTick of
-              Just tick -> writeChan chan tick
+              Just tick -> atomically $ writeTBQueue chan tick
               Nothing -> warningM "QuoteSource.Client" "Error: can't deserialize tick"
       debugM "QuoteSource.Client" "Heartbeat timeout")
 

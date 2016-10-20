@@ -38,14 +38,14 @@ unitTests = testGroup "QuoteSource.Client" [testStartStop, testTickStream]
 testStartStop = testCase "QuoteSource client connects and disconnects" $ withContext (\ctx -> do
   ep <- makeEndpoint
   chan <- atomically $ newTBQueue 1000
-  clientChan <- newBoundedChan 1000
+  clientChan <- atomically $ newTBQueue 1000
   bracket (startQuoteSourceServer chan ctx ep) stopQuoteSourceServer (\qs ->
     bracket (startQuoteSourceClient clientChan [] ctx ep) stopQuoteSourceClient (const yield)))
 
 testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\ctx -> do
   ep <- makeEndpoint
   chan <- atomically $ newTBQueue 1000
-  clientChan <- newBoundedChan 1000
+  clientChan <- atomically $ newTBQueue 1000
   bracket (startQuoteSourceServer chan ctx ep) stopQuoteSourceServer (\qs ->
     bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep) stopQuoteSourceClient (\qc -> do
       let tick = Tick {
@@ -55,6 +55,6 @@ testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\c
           value = 1000,
           volume = 1}
       forkIO $ forever $ atomically $ writeTBQueue chan (QSSTick tick)
-      recvdTick <- readChan clientChan
+      recvdTick <- atomically $ readTBQueue clientChan
       tick @=? recvdTick)))
   
