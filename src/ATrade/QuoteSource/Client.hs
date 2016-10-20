@@ -13,6 +13,7 @@ import Control.Monad
 import Control.Monad.Loops
 import Control.Exception
 import Data.List.NonEmpty
+import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Char8 as B8
@@ -27,27 +28,29 @@ import Safe
 
 data QuoteSourceClientHandle = QuoteSourceClientHandle {
   tid :: ThreadId,
-  completionMvar :: MVar ()
+  completionMvar :: MVar (),
+  killMVar :: MVar ()
 }
 
 startQuoteSourceClient :: BoundedChan Tick -> [T.Text] -> Context -> T.Text -> IO QuoteSourceClientHandle
 startQuoteSourceClient chan tickers ctx endpoint = do
   compMv <- newEmptyMVar
+  killMv <- newEmptyMVar
   now <- getCurrentTime
   lastHeartbeat <- newIORef now
-  tid <- forkIO $ finally (clientThread lastHeartbeat) (cleanup compMv)
-  return QuoteSourceClientHandle { tid = tid, completionMvar = compMv }
+  tid <- forkIO $ finally (clientThread lastHeartbeat killMv) (cleanup compMv)
+  return QuoteSourceClientHandle { tid = tid, completionMvar = compMv, killMVar = killMv }
   where
-    clientThread lastHeartbeat = forever $ withSocket ctx Sub (\sock -> do
+    clientThread lastHeartbeat killMv = whileM_ (isNothing <$> tryReadMVar killMv) $ withSocket ctx Sub (\sock -> do
       connect sock $ T.unpack endpoint
-      mapM_ (\t -> subscribe sock $ encodeUtf8 t) tickers
+      mapM_ (subscribe sock . encodeUtf8) tickers
       subscribe sock $ B8.pack "SYSTEM#HEARTBEAT"
 
       now <- getCurrentTime
       writeIORef lastHeartbeat now
-      whileM_ (notTimeout lastHeartbeat) $ do
+      whileM_ (andM [notTimeout lastHeartbeat, isNothing <$> tryReadMVar killMv]) $ do
         evs <- poll 200 [Sock sock [In] Nothing] 
-        when ((L.length . L.head) evs > 0) $ do
+        unless (null (L.head evs)) $ do
           rawTick <- fmap BL.fromStrict <$> receiveMulti sock
           now <- getCurrentTime
           prevHeartbeat <- readIORef lastHeartbeat
@@ -66,4 +69,4 @@ startQuoteSourceClient chan tickers ctx endpoint = do
     cleanup compMv = putMVar compMv ()
 
 stopQuoteSourceClient :: QuoteSourceClientHandle -> IO ()
-stopQuoteSourceClient handle = yield >> killThread (tid handle) >> readMVar (completionMvar handle)
+stopQuoteSourceClient handle = yield >> putMVar (killMVar handle) () >> readMVar (completionMvar handle)
