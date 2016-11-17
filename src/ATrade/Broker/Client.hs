@@ -21,6 +21,7 @@ import Data.Int
 import Data.IORef
 import Data.Maybe
 import Data.List.NonEmpty
+import qualified Data.List as L
 import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as BL
 import Data.Text.Encoding
@@ -51,7 +52,7 @@ brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cle
         request <- takeMVar cmd
         send sock [] (BL.toStrict $ encode request)
         events <- poll 1000 [Sock sock [In] Nothing]
-        if (not . null) events
+        if (not . null) $ L.head events
           then do
             maybeResponse <- decode . BL.fromStrict <$> receive sock
             case maybeResponse of
