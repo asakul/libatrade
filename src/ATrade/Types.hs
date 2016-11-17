@@ -138,7 +138,7 @@ deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
 deserializeTick _ = Nothing
 
 data Bar = Bar {
-  barSecurity :: !T.Text,
+  barSecurity :: !TickerId,
   barTimestamp :: !UTCTime,
   barOpen :: !Decimal,
   barHigh :: !Decimal,
