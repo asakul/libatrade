@@ -46,7 +46,6 @@ brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cle
     brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ do
       sock <- socket ctx Req
       connect sock $ T.unpack ep
-      setReceiveTimeout (restrict 1000) sock
       finally (brokerClientThread'' sock) (close sock)
     brokerClientThread'' sock = whileM_ (isNothing <$> tryReadMVar killMv) $ do
         request <- takeMVar cmd
