@@ -39,6 +39,9 @@ library
                      , monad-loops
                      , safe
                      , stm
+                     , text-format
+                     , errors
+                     , parsec
   default-language:    Haskell2010
 
 executable libatrade-exe
