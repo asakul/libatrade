@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, MultiWayIf #-}
+{-# LANGUAGE OverloadedStrings, MultiWayIf, RecordWildCards #-}
 
 module ATrade.Broker.Protocol (
   BrokerServerRequest(..),
@@ -6,15 +6,21 @@ module ATrade.Broker.Protocol (
   Notification(..),
   notificationOrderId,
   RequestSqnum(..),
-  requestSqnum
+  requestSqnum,
+  TradeSinkMessage(..)
 ) where
 
+import Control.Error.Util
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
+import Data.Text.Format
 import Data.Aeson
-import Data.Aeson.Types
+import Data.Aeson.Types hiding (parse)
 import Data.Int
+import Data.Time.Clock
+import Data.Time.Calendar
 import ATrade.Types
+import Text.Parsec
 
 type RequestSqnum = Int64
 
@@ -104,3 +110,92 @@ instance FromJSON Notification where
 instance ToJSON Notification where
   toJSON (OrderNotification oid newState) = object ["order-state" .= object [ "order-id" .= oid, "new-state" .= newState] ]
   toJSON (TradeNotification trade) = object ["trade" .= toJSON trade]
+
+data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {
+  tsAccountId :: T.Text,
+  tsSecurity :: T.Text,
+  tsPrice :: Double,
+  tsQuantity :: Int,
+  tsVolume :: Double,
+  tsCurrency :: T.Text,
+  tsOperation :: Operation,
+  tsExecutionTime :: UTCTime,
+  tsSignalId :: SignalId
+}
+
+getHMS :: UTCTime -> (Int, Int, Int, Int)
+getHMS (UTCTime _ diff) = (intsec `div` 3600, (intsec `mod` 3600) `div` 60, intsec `mod` 60, msec)
+  where
+    intsec = floor diff
+    msec = floor $ (diff - fromIntegral intsec) * 1000
+
+formatTimestamp dt = format "{}-{}-{} {}:{}:{}.{}" (left 4 '0' y, left 2 '0' m, left 2 '0' d, left 2 '0' hour, left 2 '0' min, left 2 '0' sec, left 3 '0' msec)
+  where
+    (y, m, d) = toGregorian $ utctDay dt
+    (hour, min, sec, msec) = getHMS dt 
+
+parseTimestamp (String t) = case hush $ parse p "" t of
+  Just ts -> return ts
+  Nothing -> fail "Unable to parse timestamp"
+  where
+    p = do
+      year <- read <$> many1 digit
+      char '-'
+      mon <- read <$> many1 digit
+      char '-'
+      day <- read <$> many1 digit
+      char ' '
+      hour <- read <$> many1 digit
+      char ':'
+      min <- read <$> many1 digit
+      char ':'
+      sec <- read <$> many1 digit
+      char '.'
+      msec <- many1 digit -- TODO use msec
+      return $ UTCTime (fromGregorian year mon day) (secondsToDiffTime $ hour * 3600 + min * 60 + sec)
+
+parseTimestamp _ = fail "Unable to parse timestamp: invalid type"
+
+
+instance ToJSON TradeSinkMessage where
+  toJSON TradeSinkHeartBeat = object ["command" .= T.pack "heartbeat" ]
+  toJSON TradeSinkTrade { .. } = object ["account" .= tsAccountId,
+    "security" .= tsSecurity,
+    "price" .= tsPrice,
+    "quantity" .= tsQuantity,
+    "volume" .= tsVolume,
+    "volume-currency" .= tsCurrency,
+    "operation" .= tsOperation,
+    "execution-time" .= formatTimestamp tsExecutionTime,
+    "strategy" .= strategyId tsSignalId,
+    "signal-id" .= signalName tsSignalId,
+    "comment" .= comment tsSignalId]
+
+instance FromJSON TradeSinkMessage where
+  parseJSON = withObject "object" (\obj ->
+    case HM.lookup "command" obj of
+      Nothing -> parseTrade obj
+      Just cmd -> return TradeSinkHeartBeat)
+    where
+      parseTrade v = do
+        acc <- v .: "account"
+        sec <- v .: "security"
+        pr <- v .: "price"
+        q <- v .: "quantity"
+        vol <- v .: "volume"
+        cur <- v .: "volume-currency"
+        op <- v .: "operation"
+        extime <- v .: "execution-time" >>= parseTimestamp
+        strategy <- v .: "strategy"
+        sid <- v .: "signal-id"
+        com <- v .: "comment"
+        return TradeSinkTrade {
+          tsAccountId = acc,
+          tsSecurity = sec,
+          tsPrice = pr,
+          tsQuantity = q,
+          tsVolume = vol,
+          tsCurrency = cur,
+          tsOperation = op,
+          tsExecutionTime = extime,
+          tsSignalId = SignalId strategy sid com }

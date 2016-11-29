@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards #-}
 
 module TestBrokerServer (
   unitTests
@@ -40,7 +40,8 @@ unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerCancelUnknownOrder
   , testBrokerServerCorruptedPacket
   , testBrokerServerGetNotifications
-  , testBrokerServerDuplicateRequest ]
+  , testBrokerServerDuplicateRequest
+  , testBrokerServerTradeSink ]
 
 --
 -- Few helpers
@@ -72,14 +73,14 @@ defaultOrder = mkOrder {
 
 testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
   ep <- toText <$> UV4.nextRandom
-  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep)
+  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep) ""
   stopBrokerServer broS)
 
 testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+  bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
     withSocket ctx Req (\sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
@@ -101,7 +102,7 @@ testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server retur
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock (defaultOrder { orderAccountId = "foobar" }) ep
 
@@ -119,7 +120,7 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
@@ -145,7 +146,7 @@ testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancell
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock defaultOrder ep
         receive sock
@@ -167,7 +168,7 @@ testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         step "Connecting"
         connect sock (T.unpack ep)
@@ -191,7 +192,7 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         -- We have to actually submit order, or else server won't know that we should
         -- be notified about this order
@@ -252,7 +253,7 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep) stopBrokerServer (\broS ->
+  bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
     withSocket ctx Req (\sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
@@ -275,3 +276,41 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
         Nothing -> assertFailure "Invalid response"
 
       )))
+
+testBrokerServerTradeSink = testCaseSteps "Broker Server: sends trades to trade sink" $ \step -> withContext (\ctx -> do
+  step "Setup"
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+  ep <- makeEndpoint
+  withSocket ctx Rep (\tradeSock -> do
+    bind tradeSock "inproc://trade-sink"
+    setReceiveTimeout (restrict 1000) tradeSock
+    bracket (startBrokerServer [mockBroker] ctx ep "inproc://trade-sink") stopBrokerServer (\broS -> do
+      withSocket ctx Req (\sock -> do
+        step "Connecting"
+        connectAndSendOrder step sock defaultOrder ep
+        (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+        threadDelay 100000
+
+        (Just cb) <- notificationCallback <$> readIORef broState
+        let trade = Trade {
+          tradeOrderId = orderId,
+          tradePrice = 19.82,
+          tradeQuantity = 1,
+          tradeVolume = 1982,
+          tradeVolumeCurrency = "TEST_CURRENCY",
+          tradeOperation = Buy,
+          tradeAccount = "demo",
+          tradeSecurity = "FOO",
+          tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
+          tradeSignalId = SignalId "Foo" "bar" "baz" }
+        cb (TradeNotification trade)
+
+        threadDelay 100000
+        step "Testing"
+        tradeMsg <- receive tradeSock
+        case decode . BL.fromStrict $ tradeMsg of
+          Just tsTrade@TradeSinkTrade{..} -> do
+            tsAccountId @?= tradeAccount trade
+            tsPrice @?= (fromRational . toRational . tradePrice) trade
+          _ -> assertFailure "Invalid trade in sink"
+        ))))

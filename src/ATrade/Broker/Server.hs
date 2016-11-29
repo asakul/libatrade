@@ -19,11 +19,13 @@ import Data.Aeson
 import Data.Maybe
 import Data.Time.Clock
 import Data.IORef
-import Control.Concurrent
+import Control.Concurrent hiding (readChan, writeChan)
+import Control.Concurrent.BoundedChan
 import Control.Exception
 import Control.Monad
 import Control.Monad.Loops
 import System.Log.Logger
+import System.Timeout
 import ATrade.Util
 
 newtype OrderIdGenerator = IO OrderId
@@ -46,18 +48,20 @@ data BrokerServerState = BrokerServerState {
   brokers :: [BrokerInterface],
   completionMvar :: MVar (),
   killMvar :: MVar (),
-  orderIdCounter :: OrderId
+  orderIdCounter :: OrderId,
+  tradeSink :: BoundedChan Trade
 }
 
-data BrokerServerHandle = BrokerServerHandle ThreadId (MVar ()) (MVar ())
+data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar ())
 
-startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> IO BrokerServerHandle
-startBrokerServer brokers c ep = do
+startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> T.Text -> IO BrokerServerHandle
+startBrokerServer brokers c ep tradeSinkEp = do
   sock <- socket c Router
   bind sock (T.unpack ep)
   tid <- myThreadId
   compMv <- newEmptyMVar
   killMv <- newEmptyMVar
+  tsChan <- newBoundedChan 100
   state <- newIORef BrokerServerState {
     bsSocket = sock,
     orderMap = M.empty,
@@ -67,15 +71,20 @@ startBrokerServer brokers c ep = do
     brokers = brokers,
     completionMvar = compMv,
     killMvar = killMv,
-    orderIdCounter = 1
+    orderIdCounter = 1,
+    tradeSink = tsChan
   }
   mapM_ (\bro -> setNotificationCallback bro (Just $ notificationCallback state)) brokers
 
   debugM "Broker.Server" "Forking broker server thread"
-  BrokerServerHandle <$> forkIO (brokerServerThread state) <*> pure compMv <*> pure killMv
+  BrokerServerHandle <$> forkIO (brokerServerThread state) <*> forkIO (tradeSinkHandler c state tradeSinkEp) <*> pure compMv <*> pure killMv
 
 notificationCallback :: IORef BrokerServerState -> Notification -> IO ()
 notificationCallback state n = do
+  chan <- tradeSink <$> readIORef state
+  case n of
+    TradeNotification trade -> tryWriteChan chan trade
+    _ -> return False
   orders <- orderMap <$> readIORef state
   case M.lookup (notificationOrderId n) orders of
     Just peerId -> addNotification peerId n
@@ -87,10 +96,42 @@ notificationCallback state n = do
         Just ns -> s { pendingNotifications = M.insert peerId (n : ns) (pendingNotifications s)}
         Nothing -> s { pendingNotifications = M.insert peerId [n] (pendingNotifications s)})
 
+tradeSinkHandler :: Context -> IORef BrokerServerState -> T.Text -> IO ()
+tradeSinkHandler c state tradeSinkEp = when (tradeSinkEp /= "") $
+    whileM_ (fmap killMvar (readIORef state) >>= fmap isNothing . tryReadMVar) $
+      withSocket c Req (\sock -> do
+        chan <- tradeSink <$> readIORef state
+        connect sock $ T.unpack tradeSinkEp
+        setReceiveTimeout (restrict 5000) sock
+        whileM_ (fmap killMvar (readIORef state) >>= fmap isNothing . tryReadMVar) $ do
+          threadDelay 500000
+          maybeTrade <- tryReadChan chan
+          case maybeTrade of
+            Just trade -> send sock [] $ encodeTrade trade
+            Nothing -> do
+              send sock [] $ BL.toStrict $ encode TradeSinkHeartBeat
+              void $ receive sock -- anything will do
+        )
+
+    where
+      encodeTrade :: Trade -> B.ByteString
+      encodeTrade = BL.toStrict . encode . convertTrade
+      convertTrade trade = TradeSinkTrade {
+        tsAccountId = tradeAccount trade,
+        tsSecurity = tradeSecurity trade,
+        tsPrice = fromRational . toRational . tradePrice $ trade,
+        tsQuantity = fromInteger $ tradeQuantity trade,
+        tsVolume = fromRational . toRational . tradeVolume $ trade,
+        tsCurrency = tradeVolumeCurrency trade,
+        tsOperation = tradeOperation trade,
+        tsExecutionTime = tradeTimestamp trade,
+        tsSignalId = tradeSignalId trade
+      }
+
 brokerServerThread :: IORef BrokerServerState -> IO ()
 brokerServerThread state = finally brokerServerThread' cleanup
   where
-    brokerServerThread' = whileM_ (fmap killMvar (readIORef state) >>= fmap isNothing . tryTakeMVar) $ do
+    brokerServerThread' = whileM_ (fmap killMvar (readIORef state) >>= fmap isNothing . tryReadMVar) $ do
       sock <- bsSocket <$> readIORef state
       evs <- poll 200 [Sock sock [In] Nothing] 
       when ((L.length . L.head) evs > 0) $ do
@@ -168,7 +209,9 @@ brokerServerThread state = finally brokerServerThread' cleanup
 
 
 stopBrokerServer :: BrokerServerHandle -> IO ()
-stopBrokerServer (BrokerServerHandle tid compMv killMv) = do
+stopBrokerServer (BrokerServerHandle tid tstid compMv killMv) = do
   putMVar killMv ()
-  yield >> readMVar compMv
+  killThread tstid
+  yield
+  readMVar compMv
 
