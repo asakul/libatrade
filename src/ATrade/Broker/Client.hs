@@ -43,10 +43,9 @@ brokerClientThread :: Context -> T.Text -> MVar BrokerServerRequest -> MVar Brok
 brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cleanup
   where
     cleanup = putMVar comp ()
-    brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ do
-      sock <- socket ctx Req
+    brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ withSocket ctx Req (\sock -> do
       connect sock $ T.unpack ep
-      finally (brokerClientThread'' sock) (close sock)
+      finally (brokerClientThread'' sock) (close sock))
     brokerClientThread'' sock = whileM_ (isNothing <$> tryReadMVar killMv) $ do
         request <- takeMVar cmd
         send sock [] (BL.toStrict $ encode request)

@@ -135,7 +135,8 @@ brokerServerThread state = finally brokerServerThread' cleanup
     handleMessage peerId request = do
       bros <- brokers <$> readIORef state
       case request of
-        RequestSubmitOrder sqnum order ->
+        RequestSubmitOrder sqnum order -> do
+          debugM "Broker.Server" $ "Request: submit order:" ++ show request
           case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
               oid <- nextOrderId
@@ -145,7 +146,9 @@ brokerServerThread state = finally brokerServerThread' cleanup
               submitOrder bro order { orderId = oid }
               return $ ResponseOrderSubmitted oid
 
-            Nothing -> return $ ResponseError "Unknown account"
+            Nothing -> do
+              debugM "Broker.Server" $ "Unknown account: " ++ T.unpack (orderAccountId order)
+              return $ ResponseError "Unknown account"
         RequestCancelOrder sqnum oid -> do
           m <- orderToBroker <$> readIORef state
           case M.lookup oid m of
