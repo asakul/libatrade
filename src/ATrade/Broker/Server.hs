@@ -109,6 +109,7 @@ tradeSinkHandler c state tradeSinkEp = when (tradeSinkEp /= "") $
           case maybeTrade of
             Just trade -> sendMulti sock $ B.empty :| [encodeTrade trade]
             Nothing -> do
+              threadDelay 1000000
               sendMulti sock $ B.empty :| [BL.toStrict $ encode TradeSinkHeartBeat]
               events <- poll 5000 [Sock sock [In] Nothing]
               if not . L.null . L.head $ events
