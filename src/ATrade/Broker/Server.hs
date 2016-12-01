@@ -99,17 +99,17 @@ notificationCallback state n = do
 tradeSinkHandler :: Context -> IORef BrokerServerState -> T.Text -> IO ()
 tradeSinkHandler c state tradeSinkEp = when (tradeSinkEp /= "") $
     whileM_ (not <$> wasKilled) $
-      withSocket c Req (\sock -> do
+      withSocket c Dealer (\sock -> do
         chan <- tradeSink <$> readIORef state
         connect sock $ T.unpack tradeSinkEp
         timeoutMv <- newEmptyMVar
+        threadDelay 1000000
         whileM_ (andM [not <$> wasKilled, isNothing <$> tryReadMVar timeoutMv]) $ do
-          threadDelay 500000
           maybeTrade <- tryReadChan chan
           case maybeTrade of
-            Just trade -> send sock [] $ encodeTrade trade
+            Just trade -> sendMulti sock $ B.empty :| [encodeTrade trade]
             Nothing -> do
-              send sock [] $ BL.toStrict $ encode TradeSinkHeartBeat
+              sendMulti sock $ B.empty :| [BL.toStrict $ encode TradeSinkHeartBeat]
               events <- poll 5000 [Sock sock [In] Nothing]
               if not . L.null . L.head $ events
                 then void . receive $ sock -- anything will do

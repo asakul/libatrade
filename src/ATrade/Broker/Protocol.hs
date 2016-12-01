@@ -121,7 +121,7 @@ data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {
   tsOperation :: Operation,
   tsExecutionTime :: UTCTime,
   tsSignalId :: SignalId
-}
+} deriving (Show, Eq)
 
 getHMS :: UTCTime -> (Int, Int, Int, Int)
 getHMS (UTCTime _ diff) = (intsec `div` 3600, (intsec `mod` 3600) `div` 60, intsec `mod` 60, msec)
@@ -159,7 +159,7 @@ parseTimestamp _ = fail "Unable to parse timestamp: invalid type"
 
 instance ToJSON TradeSinkMessage where
   toJSON TradeSinkHeartBeat = object ["command" .= T.pack "heartbeat" ]
-  toJSON TradeSinkTrade { .. } = object ["account" .= tsAccountId,
+  toJSON TradeSinkTrade { .. } = object ["trade" .= object ["account" .= tsAccountId,
     "security" .= tsSecurity,
     "price" .= tsPrice,
     "quantity" .= tsQuantity,
@@ -169,7 +169,7 @@ instance ToJSON TradeSinkMessage where
     "execution-time" .= formatTimestamp tsExecutionTime,
     "strategy" .= strategyId tsSignalId,
     "signal-id" .= signalName tsSignalId,
-    "comment" .= comment tsSignalId]
+    "comment" .= comment tsSignalId]]
 
 instance FromJSON TradeSinkMessage where
   parseJSON = withObject "object" (\obj ->
@@ -177,25 +177,27 @@ instance FromJSON TradeSinkMessage where
       Nothing -> parseTrade obj
       Just cmd -> return TradeSinkHeartBeat)
     where
-      parseTrade v = do
-        acc <- v .: "account"
-        sec <- v .: "security"
-        pr <- v .: "price"
-        q <- v .: "quantity"
-        vol <- v .: "volume"
-        cur <- v .: "volume-currency"
-        op <- v .: "operation"
-        extime <- v .: "execution-time" >>= parseTimestamp
-        strategy <- v .: "strategy"
-        sid <- v .: "signal-id"
-        com <- v .: "comment"
-        return TradeSinkTrade {
-          tsAccountId = acc,
-          tsSecurity = sec,
-          tsPrice = pr,
-          tsQuantity = q,
-          tsVolume = vol,
-          tsCurrency = cur,
-          tsOperation = op,
-          tsExecutionTime = extime,
-          tsSignalId = SignalId strategy sid com }
+      parseTrade obj = case HM.lookup "trade" obj of
+        Just (Object v) -> do
+          acc <- v .: "account"
+          sec <- v .: "security"
+          pr <- v .: "price"
+          q <- v .: "quantity"
+          vol <- v .: "volume"
+          cur <- v .: "volume-currency"
+          op <- v .: "operation"
+          extime <- v .: "execution-time" >>= parseTimestamp
+          strategy <- v .: "strategy"
+          sid <- v .: "signal-id"
+          com <- v .: "comment"
+          return TradeSinkTrade {
+            tsAccountId = acc,
+            tsSecurity = sec,
+            tsPrice = pr,
+            tsQuantity = q,
+            tsVolume = vol,
+            tsCurrency = cur,
+            tsOperation = op,
+            tsExecutionTime = extime,
+            tsSignalId = SignalId strategy sid com }
+        _ -> fail "Should've been trade object"

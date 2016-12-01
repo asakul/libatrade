@@ -289,7 +289,6 @@ testBrokerServerTradeSink = testCaseSteps "Broker Server: sends trades to trade 
         step "Connecting"
         connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
-        threadDelay 100000
 
         (Just cb) <- notificationCallback <$> readIORef broState
         let trade = Trade {
