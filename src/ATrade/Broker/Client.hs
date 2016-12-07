@@ -27,6 +27,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Text.Encoding
 import System.ZMQ4
 import System.Log.Logger
+import System.Timeout
 
 data BrokerClientHandle = BrokerClientHandle {
   tid :: ThreadId,
@@ -45,19 +46,15 @@ brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cle
     cleanup = putMVar comp ()
     brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ withSocket ctx Req (\sock -> do
       connect sock $ T.unpack ep
-      finally (brokerClientThread'' sock) (close sock))
-    brokerClientThread'' sock = whileM_ (isNothing <$> tryReadMVar killMv) $ do
+      whileM_ (isNothing <$> tryReadMVar killMv) $ do
         request <- takeMVar cmd
         send sock [] (BL.toStrict $ encode request)
-        events <- poll 1000 [Sock sock [In] Nothing]
-        if (not . null) $ L.head events
-          then do
-            maybeResponse <- decode . BL.fromStrict <$> receive sock
-            case maybeResponse of
-              Just response -> putMVar resp response
-              Nothing -> putMVar resp (ResponseError "Unable to decode response")
-          else
-            putMVar resp (ResponseError "Response timeout")
+        incomingMessage <- timeout 1000000 $ receive sock
+        case incomingMessage of
+          Just msg -> case decode . BL.fromStrict $ msg of
+            Just response -> putMVar resp response
+            Nothing -> putMVar resp (ResponseError "Unable to decode response")
+          Nothing -> putMVar resp (ResponseError "Response timeout"))
 
 startBrokerClient :: Context -> T.Text -> IO BrokerClientHandle
 startBrokerClient ctx endpoint = do
