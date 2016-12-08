@@ -44,17 +44,20 @@ brokerClientThread :: Context -> T.Text -> MVar BrokerServerRequest -> MVar Brok
 brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cleanup
   where
     cleanup = putMVar comp ()
-    brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ withSocket ctx Req (\sock -> do
-      connect sock $ T.unpack ep
-      whileM_ (isNothing <$> tryReadMVar killMv) $ do
-        request <- takeMVar cmd
-        send sock [] (BL.toStrict $ encode request)
-        incomingMessage <- timeout 1000000 $ receive sock
-        case incomingMessage of
-          Just msg -> case decode . BL.fromStrict $ msg of
-            Just response -> putMVar resp response
-            Nothing -> putMVar resp (ResponseError "Unable to decode response")
-          Nothing -> putMVar resp (ResponseError "Response timeout"))
+    brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ handle 
+      (\e -> do
+          warningM "Strategy" $ "Broker client: exception: " ++ show (e :: SomeException)
+          throwIO e) $ withSocket ctx Req (\sock -> do
+        connect sock $ T.unpack ep
+        whileM_ (isNothing <$> tryReadMVar killMv) $ do
+          request <- takeMVar cmd
+          send sock [] (BL.toStrict $ encode request)
+          incomingMessage <- timeout 1000000 $ receive sock
+          case incomingMessage of
+            Just msg -> case decode . BL.fromStrict $ msg of
+              Just response -> putMVar resp response
+              Nothing -> putMVar resp (ResponseError "Unable to decode response")
+            Nothing -> putMVar resp (ResponseError "Response timeout"))
 
 startBrokerClient :: Context -> T.Text -> IO BrokerClientHandle
 startBrokerClient ctx endpoint = do
