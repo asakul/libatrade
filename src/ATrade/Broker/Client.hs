@@ -46,8 +46,8 @@ brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cle
     cleanup = putMVar comp ()
     brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ handle 
       (\e -> do
-          warningM "Strategy" $ "Broker client: exception: " ++ show (e :: SomeException)
-          throwIO e) $ withSocket ctx Req (\sock -> do
+          warningM "Broker.Client" $ "Broker client: exception: " ++ show (e :: SomeException)
+          unless (isZMQError e) $ throwIO e) $ withSocket ctx Req (\sock -> do
         connect sock $ T.unpack ep
         whileM_ (isNothing <$> tryReadMVar killMv) $ do
           request <- takeMVar cmd
@@ -58,6 +58,8 @@ brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cle
               Just response -> putMVar resp response
               Nothing -> putMVar resp (ResponseError "Unable to decode response")
             Nothing -> putMVar resp (ResponseError "Response timeout"))
+    isZMQError e = "ZMQError" `L.isPrefixOf` show e
+
 
 startBrokerClient :: Context -> T.Text -> IO BrokerClientHandle
 startBrokerClient ctx endpoint = do
