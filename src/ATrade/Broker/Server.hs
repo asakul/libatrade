@@ -77,7 +77,7 @@ startBrokerServer brokers c ep tradeSinkEp = do
   mapM_ (\bro -> setNotificationCallback bro (Just $ notificationCallback state)) brokers
 
   debugM "Broker.Server" "Forking broker server thread"
-  BrokerServerHandle <$> forkIO (brokerServerThread state) <*> forkIO (tradeSinkHandler c state tradeSinkEp) <*> pure compMv <*> pure killMv
+  BrokerServerHandle <$> forkOS (brokerServerThread state) <*> forkOS (tradeSinkHandler c state tradeSinkEp) <*> pure compMv <*> pure killMv
 
 notificationCallback :: IORef BrokerServerState -> Notification -> IO ()
 notificationCallback state n = do

@@ -16,8 +16,6 @@ import Control.Monad
 import Control.Monad.Loops
 import Control.Concurrent.MVar
 import Control.Concurrent.BoundedChan
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TBQueue
 import Control.Concurrent hiding (writeChan, readChan)
 import Control.Exception
 import System.ZMQ4
@@ -37,15 +35,15 @@ unitTests = testGroup "QuoteSource.Client" [testStartStop, testTickStream]
 
 testStartStop = testCase "QuoteSource client connects and disconnects" $ withContext (\ctx -> do
   ep <- makeEndpoint
-  chan <- atomically $ newTBQueue 1000
-  clientChan <- atomically $ newTBQueue 1000
+  chan <- newBoundedChan 1000
+  clientChan <- newBoundedChan 1000
   bracket (startQuoteSourceServer chan ctx ep) stopQuoteSourceServer (\qs ->
     bracket (startQuoteSourceClient clientChan [] ctx ep) stopQuoteSourceClient (const yield)))
 
 testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\ctx -> do
   ep <- makeEndpoint
-  chan <- atomically $ newTBQueue 1000
-  clientChan <- atomically $ newTBQueue 1000
+  chan <- newBoundedChan 1000
+  clientChan <- newBoundedChan 1000
   bracket (startQuoteSourceServer chan ctx ep) stopQuoteSourceServer (\qs ->
     bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep) stopQuoteSourceClient (\qc -> do
       let tick = Tick {
@@ -54,7 +52,7 @@ testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\c
           timestamp = UTCTime (fromGregorian 2016 9 27) 16000,
           value = 1000,
           volume = 1}
-      forkIO $ forever $ atomically $ writeTBQueue chan (QSSTick tick)
-      recvdTick <- atomically $ readTBQueue clientChan
+      forkIO $ forever $ writeChan chan (QSSTick tick)
+      recvdTick <- readChan clientChan
       tick @=? recvdTick)))
   

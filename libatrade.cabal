@@ -39,8 +39,9 @@ library
                      , monad-loops
                      , safe
                      , stm
-                     , text-format
+                     , deepseq
                      , errors
+                     , text-format
                      , parsec
   default-language:    Haskell2010
 

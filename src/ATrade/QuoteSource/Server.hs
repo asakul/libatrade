@@ -8,8 +8,6 @@ module ATrade.QuoteSource.Server (
 import ATrade.Types
 import Control.Concurrent.BoundedChan
 import Control.Concurrent hiding (readChan, writeChan)
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TBQueue
 import Control.Exception
 import Control.Monad
 import qualified Data.Text as T
@@ -22,7 +20,7 @@ import System.ZMQ4
 data QuoteSourceServer = QuoteSourceServerState {
   ctx :: Context,
   outSocket :: Socket Pub,
-  tickChannel :: TBQueue QuoteSourceServerData,
+  tickChannel :: BoundedChan QuoteSourceServerData,
   completionMvar :: MVar (),
   serverThreadId :: ThreadId,
   heartbeatThreadId :: ThreadId
@@ -41,7 +39,7 @@ serverThread state = do
       putMVar (completionMvar state) ()
 
     serverThread' = do
-      qssdata <- atomically $ readTBQueue $ tickChannel state
+      qssdata <- readChan $ tickChannel state
       case qssdata of
         QSSKill -> return ()
         QSSHeartbeat -> do
@@ -51,14 +49,14 @@ serverThread state = do
           sendMulti (outSocket state) $ fromList . map BL.toStrict $ serializeTick tick
           serverThread'
 
-startQuoteSourceServer :: TBQueue QuoteSourceServerData -> Context -> T.Text -> IO QuoteSourceServer
+startQuoteSourceServer :: BoundedChan QuoteSourceServerData -> Context -> T.Text -> IO QuoteSourceServer
 startQuoteSourceServer chan c ep = do
   sock <- socket c Pub
   bind sock $ T.unpack ep
   tid <- myThreadId
   hbTid <- forkIO $ forever $ do
     threadDelay 1000000
-    atomically $ writeTBQueue chan QSSHeartbeat
+    writeChan chan QSSHeartbeat
     
   mv <- newEmptyMVar
   let state = QuoteSourceServerState {
@@ -69,9 +67,9 @@ startQuoteSourceServer chan c ep = do
     serverThreadId = tid,
     heartbeatThreadId = hbTid
   }
-  stid <- forkIO $ serverThread state
+  stid <- forkOS $ serverThread state
   return $ state { serverThreadId = stid }
 
 stopQuoteSourceServer :: QuoteSourceServer -> IO ()
-stopQuoteSourceServer server = killThread (heartbeatThreadId server) >> atomically (writeTBQueue (tickChannel server) QSSKill) >> readMVar (completionMvar server)
+stopQuoteSourceServer server = killThread (heartbeatThreadId server) >> (writeChan (tickChannel server) QSSKill) >> readMVar (completionMvar server)
 
