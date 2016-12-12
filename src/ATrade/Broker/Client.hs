@@ -69,7 +69,8 @@ brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cle
               Nothing -> putMVar resp (ResponseError "Unable to decode response")
             Nothing -> do
               putMVar resp (ResponseError "Response timeout")
-              writeIORef isTimeout True)
+              writeIORef isTimeout True
+        threadDelay 1000000)
     isZMQError e = "ZMQError" `L.isPrefixOf` show e
 
 

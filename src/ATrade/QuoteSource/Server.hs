@@ -10,12 +10,14 @@ import Control.Concurrent.BoundedChan
 import Control.Concurrent hiding (readChan, writeChan)
 import Control.Exception
 import Control.Monad
+import qualified Data.List as L
 import qualified Data.Text as T
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
 import Data.List.NonEmpty hiding (map)
 import System.Log.Logger
 import System.ZMQ4
+import Prelude hiding ((!!))
 
 data QuoteSourceServer = QuoteSourceServerState {
   ctx :: Context,
@@ -47,6 +49,9 @@ serverThread state = do
           serverThread'
         QSSTick tick -> do
           sendMulti (outSocket state) $ fromList . map BL.toStrict $ serializeTick tick
+          {-let t = map BL.toStrict $ serializeTick tick-}
+          {-sendDirect (outSocket state) [SendMore] (L.head t)-}
+          {-sendDirect (outSocket state) [] (t L.!! 1)-}
           serverThread'
 
 startQuoteSourceServer :: BoundedChan QuoteSourceServerData -> Context -> T.Text -> IO QuoteSourceServer
@@ -67,7 +72,7 @@ startQuoteSourceServer chan c ep = do
     serverThreadId = tid,
     heartbeatThreadId = hbTid
   }
-  stid <- forkOS $ serverThread state
+  stid <- forkIO $ serverThread state
   return $ state { serverThreadId = stid }
 
 stopQuoteSourceServer :: QuoteSourceServer -> IO ()

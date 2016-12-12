@@ -92,7 +92,7 @@ serializeTick tick = header : [rawdata]
       putWord32le $ fromIntegral . fracSeconds . timestamp $ tick,
       putWord32le $ fromIntegral . fromEnum . datatype $ tick,
       putWord64le $ truncate . value $ tick,
-      putWord32le $ truncate . (* 1000000000) . fractionalPart $ value tick,
+      putWord32le $ truncate . (*. 1000000000) . fractionalPart $ value tick,
       putWord32le $ fromIntegral $ volume tick ]
     floorPart :: (RealFrac a) => a -> a
     floorPart x = x - fromIntegral (floor x)
