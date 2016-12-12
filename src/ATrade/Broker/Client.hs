@@ -43,11 +43,14 @@ data BrokerClientHandle = BrokerClientHandle {
 brokerClientThread :: Context -> T.Text -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> MVar () -> MVar () -> IO ()
 brokerClientThread ctx ep cmd resp comp killMv = finally brokerClientThread' cleanup
   where
-    cleanup = putMVar comp ()
-    brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ handle 
-      (\e -> do
+    cleanup = infoM "Broker.Client" "Quitting broker client thread" >> putMVar comp ()
+    brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ do
+      debugM "Broker.Client" "Starting event loop"
+      handle (\e -> do
           warningM "Broker.Client" $ "Broker client: exception: " ++ (show (e :: SomeException)) ++ "; isZMQ: " ++ show (isZMQError e)
-          unless (isZMQError e) $ throwIO e) $ withSocket ctx Req (\sock -> do
+          unless (isZMQError e) $ do
+            debugM "Broker.Client" "Rethrowing exception"
+            throwIO e) $ withSocket ctx Req (\sock -> do
         connect sock $ T.unpack ep
         whileM_ (isNothing <$> tryReadMVar killMv) $ do
           request <- takeMVar cmd
