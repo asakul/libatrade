@@ -89,7 +89,7 @@ serializeTick tick = header : [rawdata]
     rawdata = toLazyByteString $ mconcat [
       putWord32le 1,
       putWord64le $ fromIntegral . toSeconds' . timestamp $ tick,
-      putWord32le $ fromIntegral . floor . (* 1000000) . fracSeconds . timestamp $ tick,
+      putWord32le $ fromIntegral . fracSeconds . timestamp $ tick,
       putWord32le $ fromIntegral . fromEnum . datatype $ tick,
       putWord64le $ truncate . value $ tick,
       putWord32le $ truncate . (* 1000000000) . fractionalPart $ value tick,
@@ -99,7 +99,7 @@ serializeTick tick = header : [rawdata]
     fractionalPart :: (RealFrac a) => a -> a
     fractionalPart x = x - fromIntegral (truncate x)
     toSeconds' t = floor $ diffUTCTime t epoch
-    fracSeconds t = floorPart $ diffUTCTime t epoch
+    fracSeconds t = (truncate $ (* 1000000000000) $ diffUTCTime t epoch) `mod` 1000000000000 `div` 1000000
     epoch = fromGregorian 1970 1 1 0 0 0
 
 
