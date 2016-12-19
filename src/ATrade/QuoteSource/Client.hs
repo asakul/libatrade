@@ -7,7 +7,7 @@ module ATrade.QuoteSource.Client (
 
 import ATrade.Types
 import Control.Concurrent.BoundedChan
-import Control.Concurrent hiding (readChan, writeChan)
+import Control.Concurrent hiding (readChan, writeChan, writeList2Chan)
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Loops
@@ -32,6 +32,15 @@ data QuoteSourceClientHandle = QuoteSourceClientHandle {
   killMVar :: MVar ()
 }
 
+deserializeTicks :: [BL.ByteString] -> [Tick]
+deserializeTicks (secname:raw:_) = deserializeWithName (decodeUtf8 . BL.toStrict $ secname) raw
+  where
+    deserializeWithName secNameT raw = case deserializeTickBody raw of
+      (rest, Just tick) -> tick { security = secNameT } : deserializeWithName secNameT rest
+      _ -> []
+
+deserializeTicks _ = []
+
 startQuoteSourceClient :: BoundedChan Tick -> [T.Text] -> Context -> T.Text -> IO QuoteSourceClientHandle
 startQuoteSourceClient chan tickers ctx endpoint = do
   compMv <- newEmptyMVar
@@ -43,6 +52,7 @@ startQuoteSourceClient chan tickers ctx endpoint = do
   where
     clientThread lastHeartbeat killMv = whileM_ (isNothing <$> tryReadMVar killMv) $ withSocket ctx Sub (\sock -> do
       connect sock $ T.unpack endpoint
+      debugM "QuoteSource.Client" $ "Tickers: " ++ show tickers
       mapM_ (subscribe sock . encodeUtf8) tickers
       subscribe sock $ B8.pack "SYSTEM#HEARTBEAT"
 
@@ -56,9 +66,7 @@ startQuoteSourceClient chan tickers ctx endpoint = do
           prevHeartbeat <- readIORef lastHeartbeat
           if headMay rawTick == Just "SYSTEM#HEARTBEAT"
             then writeIORef lastHeartbeat now
-            else case deserializeTick rawTick of
-              Just tick -> writeChan chan tick
-              Nothing -> warningM "QuoteSource.Client" "Error: can't deserialize tick"
+            else writeList2Chan chan (deserializeTicks rawTick)
       debugM "QuoteSource.Client" "Heartbeat timeout")
 
     notTimeout ts = do

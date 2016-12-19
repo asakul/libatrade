@@ -6,7 +6,9 @@ module ATrade.Types (
   Bar(..),
   DataType(..),
   serializeTick,
+  serializeTickBody,
   deserializeTick,
+  deserializeTickBody,
   SignalId(..),
   OrderPrice(..),
   Operation(..),
@@ -32,6 +34,7 @@ import Data.Ratio
 import Data.Text as T
 import Data.Text.Encoding as E
 import Data.Time.Clock
+import Data.Time.Clock.POSIX
 import Data.Word
 
 type TickerId = T.Text
@@ -82,11 +85,11 @@ data Tick = Tick {
   volume :: !Integer
 } deriving (Show, Eq)
 
-serializeTick :: Tick -> [ByteString]
-serializeTick tick = header : [rawdata]
-  where
-    header = B.fromStrict . E.encodeUtf8 $ security tick
-    rawdata = toLazyByteString $ mconcat [
+serializeTickHeader :: Tick -> ByteString
+serializeTickHeader tick = B.fromStrict . E.encodeUtf8 $ security tick
+
+serializeTickBody :: Tick -> ByteString
+serializeTickBody tick = toLazyByteString $ mconcat [
       putWord32le 1,
       putWord64le $ fromIntegral . toSeconds' . timestamp $ tick,
       putWord32le $ fromIntegral . fracSeconds . timestamp $ tick,
@@ -94,36 +97,32 @@ serializeTick tick = header : [rawdata]
       putWord64le $ truncate . value $ tick,
       putWord32le $ truncate . (*. 1000000000) . fractionalPart $ value tick,
       putWord32le $ fromIntegral $ volume tick ]
-    floorPart :: (RealFrac a) => a -> a
-    floorPart x = x - fromIntegral (floor x)
+  where
     fractionalPart :: (RealFrac a) => a -> a
     fractionalPart x = x - fromIntegral (truncate x)
-    toSeconds' t = floor $ diffUTCTime t epoch
-    fracSeconds t = (truncate $ (* 1000000000000) $ diffUTCTime t epoch) `mod` 1000000000000 `div` 1000000
-    epoch = fromGregorian 1970 1 1 0 0 0
+    toSeconds' = floor . utcTimeToPOSIXSeconds
+    fracSeconds t = (truncate $ (* 1000000000000) $ utcTimeToPOSIXSeconds t) `mod` 1000000000000 `div` 1000000
 
 
-deserializeTick :: [ByteString] -> Maybe Tick
-deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
-  Left (_, _, _) -> Nothing
-  Right (_, _, tick) -> Just $ tick { security = E.decodeUtf8 . B.toStrict $ header }
+serializeTick :: Tick -> [ByteString]
+serializeTick tick = serializeTickHeader tick : [serializeTickBody tick]
+
+parseTick :: Get Tick
+parseTick = do
+  packetType <- fromEnum <$> getWord32le
+  when (packetType /= 1) $ fail "Expected packettype == 1"
+  tsec <- getWord64le
+  tusec <- getWord32le
+  dt <- toEnum . fromEnum <$> getWord32le
+  intpart <- (fromIntegral <$> getWord64le) :: Get Int64
+  nanopart <- (fromIntegral <$> getWord32le) :: Get Int32
+  volume <- fromIntegral <$> (fromIntegral <$> getWord32le :: Get Int32)
+  return Tick { security = "",
+    datatype = dt,
+    timestamp = makeTimestamp tsec tusec,
+    value = makeValue intpart nanopart,
+    volume = volume }
   where
-    parseTick :: Get Tick
-    parseTick = do
-      packetType <- fromEnum <$> getWord32le
-      when (packetType /= 1) $ fail "Expected packettype == 1"
-      tsec <- getWord64le
-      tusec <- getWord32le
-      dt <- toEnum . fromEnum <$> getWord32le
-      intpart <- (fromIntegral <$> getWord64le) :: Get Int64
-      nanopart <- (fromIntegral <$> getWord32le) :: Get Int32
-      volume <- fromIntegral <$> (fromIntegral <$> getWord32le :: Get Int32)
-      return Tick { security = "",
-        datatype = dt,
-        timestamp = makeTimestamp tsec tusec,
-        value = makeValue intpart nanopart,
-        volume = volume }
-
     makeTimestamp :: Word64 -> Word32 -> UTCTime
     makeTimestamp sec usec = addUTCTime (fromRational $ toInteger usec % 1000000) (fromSeconds . toInteger $ sec)
 
@@ -135,7 +134,17 @@ deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
         convertedIntPart = realFracToDecimal 10 (fromIntegral intpart) 
         r = toInteger nanopart % 1000000000
 
+deserializeTick :: [ByteString] -> Maybe Tick
+deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
+  Left (_, _, _) -> Nothing
+  Right (_, _, tick) -> Just $ tick { security = E.decodeUtf8 . B.toStrict $ header }
+
 deserializeTick _ = Nothing
+
+deserializeTickBody :: ByteString -> (ByteString, Maybe Tick)
+deserializeTickBody bs = case runGetOrFail parseTick bs of
+  Left (rest, _, _) -> (rest, Nothing)
+  Right (rest, _, tick) -> (rest, Just tick)
 
 data Bar = Bar {
   barSecurity :: !TickerId,

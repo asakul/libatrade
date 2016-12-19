@@ -37,7 +37,6 @@ resolver: lts-7.7
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
-- '../zeromq-haskell'
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps: [ "datetime-0.3.1", "hexdump-0.1"]

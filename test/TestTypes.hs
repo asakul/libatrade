@@ -21,9 +21,11 @@ import Data.Text
 import Data.Time.Calendar
 import Data.Time.Clock
 import Data.Tuple.Select
+import qualified Data.ByteString.Lazy as B
 
 properties = testGroup "Types" [
     testTickSerialization
+  , testTickBodySerialization
   , testSignalIdSerialization
   , testOrderPriceSerialization
   , testOperationSerialization
@@ -36,6 +38,18 @@ testTickSerialization = QC.testProperty "Deserialize serialized tick"
   (\tick -> case (deserializeTick . serializeTick) tick of
     Just t -> tick == t
     Nothing -> False)
+
+-- Adjust arbitrary instances of ticks, because body doesn't store security name
+testTickBodySerialization = QC.testProperty "Deserialize serialized bunch of tick" $
+  QC.forAll (arbitrary >>= (\t -> return t { security = "" })) (\tick1 -> 
+    QC.forAll (arbitrary >>= (\t -> return t { security = "" })) (\tick2 ->
+      case deserializeTickBody (serialized tick1 tick2) of
+        (rest, Just t1) -> case deserializeTickBody rest of
+          (_, Just t2) -> tick1 == t1 && tick2 == t2
+          _ -> False
+        _ -> False))
+  where
+    serialized t1 t2 = serializeTickBody t1 `B.append` serializeTickBody t2
 
 testSignalIdSerialization = QC.testProperty "Deserialize serialized SignalId"
   (\sid -> case (decode . encode $ sid :: Maybe SignalId) of
