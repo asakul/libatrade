@@ -25,6 +25,7 @@ import Control.Concurrent.BoundedChan
 import Control.Concurrent hiding (writeChan)
 import Control.Exception
 import System.ZMQ4
+import System.ZMQ4.ZAP
 import Data.Aeson
 import Data.Time.Clock
 import Data.Time.Calendar
@@ -56,8 +57,8 @@ defaultOrder = mkOrder {
 testBrokerClientStartStop = testCase "Broker client: submit order" $ withContext (\ctx -> do
   ep <- makeEndpoint
   (mockBroker, broState) <- mkMockBroker ["demo"]
-  bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
-    bracket (startBrokerClient ctx ep) stopBrokerClient (\broC -> do
+  bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerClient ctx ep Nothing) stopBrokerClient (\broC -> do
       oid <- submitOrder broC defaultOrder
       case oid of
         Left err -> assertFailure "Invalid response"
@@ -66,8 +67,8 @@ testBrokerClientStartStop = testCase "Broker client: submit order" $ withContext
 testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" $ withContext (\ctx -> do
   ep <- makeEndpoint
   (mockBroker, broState) <- mkMockBroker ["demo"]
-  bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
-    bracket (startBrokerClient ctx ep) stopBrokerClient (\broC -> do
+  bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerClient ctx ep Nothing) stopBrokerClient (\broC -> do
       maybeOid <- submitOrder broC defaultOrder
       case maybeOid of
         Left err -> assertFailure "Invalid response"
@@ -81,8 +82,8 @@ testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" 
 testBrokerClientGetNotifications = testCase "Broker client: get notifications" $ withContext (\ctx -> do
   ep <- makeEndpoint
   (mockBroker, broState) <- mkMockBroker ["demo"]
-  bracket (startBrokerServer [mockBroker] ctx ep "") stopBrokerServer (\broS ->
-    bracket (startBrokerClient ctx ep) stopBrokerClient (\broC -> do
+  bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerClient ctx ep Nothing) stopBrokerClient (\broC -> do
       maybeOid <- submitOrder broC defaultOrder
       case maybeOid of
         Left err -> assertFailure "Invalid response"

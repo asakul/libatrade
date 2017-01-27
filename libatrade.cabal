@@ -34,6 +34,7 @@ library
                      , BoundedChan
                      , hslogger
                      , zeromq4-haskell
+                     , zeromq4-haskell-zap
                      , unordered-containers
                      , containers
                      , monad-loops
@@ -77,6 +78,7 @@ test-suite libatrade-test
                      , BoundedChan
                      , hslogger
                      , zeromq4-haskell
+                     , zeromq4-haskell-zap
                      , bytestring
                      , monad-loops
                      , uuid

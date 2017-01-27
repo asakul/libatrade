@@ -9,6 +9,7 @@ module ATrade.Broker.Server (
 import ATrade.Types
 import ATrade.Broker.Protocol
 import System.ZMQ4
+import System.ZMQ4.ZAP
 import Data.List.NonEmpty
 import qualified Data.Map as M
 import qualified Data.ByteString as B hiding (putStrLn)
@@ -54,9 +55,14 @@ data BrokerServerState = BrokerServerState {
 
 data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar ())
 
-startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> T.Text -> IO BrokerServerHandle
-startBrokerServer brokers c ep tradeSinkEp = do
+startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> T.Text -> Maybe CurveCertificate -> IO BrokerServerHandle
+startBrokerServer brokers c ep tradeSinkEp maybeCert = do
   sock <- socket c Router
+  case maybeCert of
+    Just cert -> do
+      setCurveServer True sock
+      zapApplyCertificate cert sock
+    Nothing -> return ()
   bind sock (T.unpack ep)
   tid <- myThreadId
   compMv <- newEmptyMVar
@@ -137,29 +143,31 @@ brokerServerThread state = finally brokerServerThread' cleanup
   where
     brokerServerThread' = whileM_ (fmap killMvar (readIORef state) >>= fmap isNothing . tryReadMVar) $ do
       sock <- bsSocket <$> readIORef state
-      msg <- timeout 1000000 $ receiveMulti sock
-      case msg of
-        Just [peerId, _, payload] ->
-          case decode . BL.fromStrict $ payload of
-            Just request -> do
-              let sqnum = requestSqnum request
-              -- Here, we should check if previous packet sequence number is the same
-              -- If it is, we should resend previous response
-              lastPackMap <- lastPacket <$> readIORef state
-              case shouldResend sqnum peerId lastPackMap of
-                Just response -> sendMessage sock peerId response -- Resend
-                Nothing -> do
-                  -- Handle incoming request, send response
-                  response <- handleMessage peerId request
-                  sendMessage sock peerId response
-                  -- and store response in case we'll need to resend it
-                  atomicMapIORef state (\s -> s { lastPacket = M.insert peerId (sqnum, response) (lastPacket s)})
-            Nothing -> do
-              -- If we weren't able to parse request, we should send error
-              -- but shouldn't update lastPacket
-              let response = ResponseError "Invalid request"
-              sendMessage sock peerId response
-        _ -> warningM "Broker.Server" ("Invalid packet received: " ++ show msg)
+      events <- poll 100 [Sock sock [In] Nothing]
+      unless (null . L.head $ events) $ do
+        msg <- receiveMulti sock
+        case msg of
+          [peerId, _, payload] ->
+            case decode . BL.fromStrict $ payload of
+              Just request -> do
+                let sqnum = requestSqnum request
+                -- Here, we should check if previous packet sequence number is the same
+                -- If it is, we should resend previous response
+                lastPackMap <- lastPacket <$> readIORef state
+                case shouldResend sqnum peerId lastPackMap of
+                  Just response -> sendMessage sock peerId response -- Resend
+                  Nothing -> do
+                    -- Handle incoming request, send response
+                    response <- handleMessage peerId request
+                    sendMessage sock peerId response
+                    -- and store response in case we'll need to resend it
+                    atomicMapIORef state (\s -> s { lastPacket = M.insert peerId (sqnum, response) (lastPacket s)})
+              Nothing -> do
+                -- If we weren't able to parse request, we should send error
+                -- but shouldn't update lastPacket
+                let response = ResponseError "Invalid request"
+                sendMessage sock peerId response
+          _ -> warningM "Broker.Server" ("Invalid packet received: " ++ show msg)
 
     shouldResend sqnum peerId lastPackMap = case M.lookup peerId lastPackMap of
       Just (lastSqnum, response) -> if sqnum == lastSqnum
@@ -219,4 +227,3 @@ stopBrokerServer (BrokerServerHandle tid tstid compMv killMv) = do
   killThread tstid
   yield
   readMVar compMv
-
