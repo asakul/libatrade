@@ -16,7 +16,11 @@ module ATrade.Types (
   Order(..),
   mkOrder,
   Trade(..),
-  OrderId(..)
+  OrderId(..),
+  ServerSecurityParams(..),
+  defaultServerSecurityParams,
+  ClientSecurityParams(..),
+  defaultClientSecurityParams
 ) where
 
 import Control.Monad
@@ -36,6 +40,8 @@ import Data.Text.Encoding as E
 import Data.Time.Clock
 import Data.Time.Clock.POSIX
 import Data.Word
+
+import System.ZMQ4.ZAP
 
 type TickerId = T.Text
 
@@ -345,3 +351,25 @@ instance ToJSON Trade where
     "security" .= tradeSecurity trade,
     "execution-time" .= tradeTimestamp trade,
     "signal-id" .= tradeSignalId trade]
+
+data ServerSecurityParams = ServerSecurityParams {
+  sspDomain :: Maybe T.Text,
+  sspCertificate :: Maybe CurveCertificate
+} deriving (Show, Eq)
+
+defaultServerSecurityParams = ServerSecurityParams {
+  sspDomain = Nothing,
+  sspCertificate = Nothing
+}
+
+data ClientSecurityParams = ClientSecurityParams {
+  cspDomain :: Maybe T.Text,
+  cspCertificate :: Maybe CurveCertificate,
+  cspServerCertificate :: Maybe CurveCertificate
+} deriving (Show, Eq)
+
+defaultClientSecurityParams = ClientSecurityParams {
+  cspCertificate = Nothing,
+  cspServerCertificate = Nothing
+}
+

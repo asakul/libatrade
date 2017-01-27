@@ -41,8 +41,8 @@ data BrokerClientHandle = BrokerClientHandle {
   respVar :: MVar BrokerServerResponse
 }
 
-brokerClientThread :: Context -> T.Text -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> MVar () -> MVar () -> Maybe (CurveCertificate, CurveCertificate) -> IO ()
-brokerClientThread ctx ep cmd resp comp killMv maybeCerts = finally brokerClientThread' cleanup
+brokerClientThread :: Context -> T.Text -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> MVar () -> MVar () -> ClientSecurityParams -> IO ()
+brokerClientThread ctx ep cmd resp comp killMv secParams = finally brokerClientThread' cleanup
   where
     cleanup = infoM "Broker.Client" "Quitting broker client thread" >> putMVar comp ()
     brokerClientThread' = whileM_ (isNothing <$> tryReadMVar killMv) $ do
@@ -56,10 +56,11 @@ brokerClientThread ctx ep cmd resp comp killMv maybeCerts = finally brokerClient
             else do
               putMVar resp (ResponseError "Response error")) $ withSocket ctx Req (\sock -> do
         debugM "Broker.Client" $ "Connecting to: " ++ show (T.unpack ep)
-        case maybeCerts of
-          Just (clientCert, serverCert) -> do
-            zapApplyCertificate clientCert sock
-            zapSetServerCertificate serverCert sock
+        case cspCertificate secParams of
+          Just clientCert -> zapApplyCertificate clientCert sock
+          Nothing -> return ()
+        case cspServerCertificate secParams of
+          Just serverCert -> zapSetServerCertificate serverCert sock
           Nothing -> return ()
             
         connect sock $ T.unpack ep
@@ -81,14 +82,14 @@ brokerClientThread ctx ep cmd resp comp killMv maybeCerts = finally brokerClient
     isZMQError e = "ZMQError" `L.isPrefixOf` show e
 
 
-startBrokerClient :: Context -> T.Text -> Maybe (CurveCertificate, CurveCertificate) -> IO BrokerClientHandle
-startBrokerClient ctx endpoint maybeCerts = do
+startBrokerClient :: Context -> T.Text -> ClientSecurityParams -> IO BrokerClientHandle
+startBrokerClient ctx endpoint secParams = do
   idCounter <- newIORef 1
   compMv <- newEmptyMVar
   killMv <- newEmptyMVar
   cmdVar <- newEmptyMVar :: IO (MVar BrokerServerRequest)
   respVar <- newEmptyMVar :: IO (MVar BrokerServerResponse)
-  tid <- forkIO (brokerClientThread ctx endpoint cmdVar respVar compMv killMv maybeCerts)
+  tid <- forkIO (brokerClientThread ctx endpoint cmdVar respVar compMv killMv secParams)
 
   return BrokerClientHandle {
     tid = tid,

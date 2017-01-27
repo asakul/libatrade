@@ -55,10 +55,13 @@ data BrokerServerState = BrokerServerState {
 
 data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar ())
 
-startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> T.Text -> Maybe CurveCertificate -> IO BrokerServerHandle
-startBrokerServer brokers c ep tradeSinkEp maybeCert = do
+startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> T.Text -> ServerSecurityParams -> IO BrokerServerHandle
+startBrokerServer brokers c ep tradeSinkEp params = do
   sock <- socket c Router
-  case maybeCert of
+  case sspDomain params of
+    Just domain -> setZapDomain domain sock
+    Nothing -> return ()
+  case sspCertificate params of
     Just cert -> do
       setCurveServer True sock
       zapApplyCertificate cert sock

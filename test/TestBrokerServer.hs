@@ -74,14 +74,14 @@ defaultOrder = mkOrder {
 
 testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
   ep <- toText <$> UV4.nextRandom
-  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep) "" Nothing
+  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep) "" defaultServerSecurityParams
   stopBrokerServer broS)
 
 testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS -> do
+  bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS -> do
     withSocket ctx Req (\sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
@@ -103,7 +103,7 @@ testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server retur
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock (defaultOrder { orderAccountId = "foobar" }) ep
 
@@ -121,7 +121,7 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
@@ -147,7 +147,7 @@ testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancell
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock defaultOrder ep
         receive sock
@@ -169,7 +169,7 @@ testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         step "Connecting"
         connect sock (T.unpack ep)
@@ -193,7 +193,7 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         -- We have to actually submit order, or else server won't know that we should
         -- be notified about this order
@@ -254,7 +254,7 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep "" Nothing) stopBrokerServer (\broS ->
+  bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
     withSocket ctx Req (\sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
@@ -285,7 +285,7 @@ testBrokerServerTradeSink = testCaseSteps "Broker Server: sends trades to trade 
   withSocket ctx Rep (\tradeSock -> do
     bind tradeSock "inproc://trade-sink"
     setReceiveTimeout (restrict 1000) tradeSock
-    bracket (startBrokerServer [mockBroker] ctx ep "inproc://trade-sink" Nothing) stopBrokerServer (\broS -> do
+    bracket (startBrokerServer [mockBroker] ctx ep "inproc://trade-sink" defaultServerSecurityParams) stopBrokerServer (\broS -> do
       withSocket ctx Req (\sock -> do
         step "Connecting"
         connectAndSendOrder step sock defaultOrder ep
