@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module ATrade.Types (
   TickerId,
@@ -22,6 +23,8 @@ module ATrade.Types (
   ClientSecurityParams(..),
   defaultClientSecurityParams
 ) where
+
+import GHC.Generics
 
 import Control.Monad
 import Data.Aeson
@@ -55,7 +58,7 @@ data DataType = Unknown
   | Volatility
   | TotalSupply
   | TotalDemand
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 instance Enum DataType where
   fromEnum x
@@ -89,7 +92,7 @@ data Tick = Tick {
   timestamp :: !UTCTime,
   value :: !Decimal,
   volume :: !Integer
-} deriving (Show, Eq)
+} deriving (Show, Eq, Generic)
 
 serializeTickHeader :: Tick -> ByteString
 serializeTickHeader tick = B.fromStrict . E.encodeUtf8 $ security tick
