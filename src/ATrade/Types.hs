@@ -376,3 +376,11 @@ defaultClientSecurityParams = ClientSecurityParams {
   cspServerCertificate = Nothing
 }
 
+data TickerInfo = TickerInfo {
+  tiTicker :: TickerId,
+  tiClass :: T.Text,
+  tiBase :: Maybe TickerId,
+  tiLotSize :: Integer,
+  tiTickSize :: Decimal
+} deriving (Show, Eq)
+
