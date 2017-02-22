@@ -55,6 +55,7 @@ brokerClientThread ctx ep cmd resp comp killMv secParams = finally brokerClientT
               throwIO e
             else do
               putMVar resp (ResponseError "Response error")) $ withSocket ctx Req (\sock -> do
+        setLinger (restrict 0) sock
         debugM "Broker.Client" $ "Connecting to: " ++ show (T.unpack ep)
         case cspCertificate secParams of
           Just clientCert -> zapApplyCertificate clientCert sock

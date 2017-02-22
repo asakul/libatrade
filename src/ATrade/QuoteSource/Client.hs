@@ -51,6 +51,7 @@ startQuoteSourceClient chan tickers ctx endpoint = do
   return QuoteSourceClientHandle { tid = tid, completionMvar = compMv, killMVar = killMv }
   where
     clientThread lastHeartbeat killMv = whileM_ (isNothing <$> tryReadMVar killMv) $ withSocket ctx Sub (\sock -> do
+      setLinger (restrict 0) sock
       connect sock $ T.unpack endpoint
       debugM "QuoteSource.Client" $ "Tickers: " ++ show tickers
       mapM_ (subscribe sock . encodeUtf8) tickers

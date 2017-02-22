@@ -58,6 +58,7 @@ data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar (
 startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> T.Text -> ServerSecurityParams -> IO BrokerServerHandle
 startBrokerServer brokers c ep tradeSinkEp params = do
   sock <- socket c Router
+  setLinger (restrict 0) sock
   case sspDomain params of
     Just domain -> setZapDomain domain sock
     Nothing -> return ()
@@ -109,6 +110,7 @@ tradeSinkHandler :: Context -> IORef BrokerServerState -> T.Text -> IO ()
 tradeSinkHandler c state tradeSinkEp = when (tradeSinkEp /= "") $
     whileM_ (not <$> wasKilled) $
       withSocket c Dealer (\sock -> do
+        setLinger (restrict 0) sock
         chan <- tradeSink <$> readIORef state
         connect sock $ T.unpack tradeSinkEp
         timeoutMv <- newEmptyMVar
