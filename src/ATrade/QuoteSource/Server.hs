@@ -82,6 +82,7 @@ serverThread state = do
 startQuoteSourceServer :: BoundedChan QuoteSourceServerData -> Context -> T.Text -> IO QuoteSourceServer
 startQuoteSourceServer chan c ep = do
   sock <- socket c Pub
+  setLinger (restrict 0) sock
   bind sock $ T.unpack ep
   tid <- myThreadId
   hbTid <- forkIO $ forever $ do
