@@ -70,7 +70,7 @@ brokerClientThread ctx ep cmd resp comp killMv secParams = finally brokerClientT
         whileM_ (andM [isNothing <$> tryReadMVar killMv, (== False) <$> readIORef isTimeout]) $ do
           request <- takeMVar cmd
           send sock [] (BL.toStrict $ encode request)
-          incomingMessage <- timeout 1000000 $ receive sock
+          incomingMessage <- timeout 5000000 $ receive sock
           case incomingMessage of
             Just msg -> case decode . BL.fromStrict $ msg of
               Just response -> putMVar resp response
