@@ -119,10 +119,13 @@ tradeSinkHandler c state tradeSinkEp = when (tradeSinkEp /= "") $
         connect sock $ T.unpack tradeSinkEp
         timeoutMv <- newIORef False
         threadDelay 1000000
-        whileM_ (andM [not <$> wasKilled, readIORef timeoutMv]) $ do
+        whileM_ (andM [not <$> wasKilled, not <$> readIORef timeoutMv]) $ do
           maybeTrade <- tryReadChan chan
           case maybeTrade of
-            Just trade -> sendMulti sock $ B.empty :| [encodeTrade trade]
+            Just trade -> do
+              sendMulti sock $ B.empty :| [encodeTrade trade]
+              _ <- receiveMulti sock
+              return ()
             Nothing -> do
               threadDelay 1000000
               sendMulti sock $ B.empty :| [BL.toStrict $ encode TradeSinkHeartBeat]
@@ -169,8 +172,6 @@ brokerServerThread state = finally brokerServerThread' cleanup
                 case shouldResend sqnum peerId lastPackMap of
                   Just response -> do
                     sendMessage sock peerId response -- Resend
-                    _ <- receiveMulti sock
-                    return ()
                   Nothing -> do
                     -- Handle incoming request, send response
                     response <- handleMessage peerId request
