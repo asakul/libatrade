@@ -251,12 +251,17 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
         )))
 
 testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate request" $ \step -> withContext (\ctx -> do
+  putStrLn "epsilon"
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
+  putStrLn "delta"
+  bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS -> do
+    putStrLn "gamma"
     withSocket ctx Req (\sock -> do
+      putStrLn "alpha"
       connectAndSendOrder step sock defaultOrder ep
+      putStrLn "beta"
 
       step "Reading response"
       (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock

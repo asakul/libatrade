@@ -167,7 +167,10 @@ brokerServerThread state = finally brokerServerThread' cleanup
                 -- If it is, we should resend previous response
                 lastPackMap <- lastPacket <$> readIORef state
                 case shouldResend sqnum peerId lastPackMap of
-                  Just response -> sendMessage sock peerId response -- Resend
+                  Just response -> do
+                    sendMessage sock peerId response -- Resend
+                    _ <- receiveMulti sock
+                    return ()
                   Nothing -> do
                     -- Handle incoming request, send response
                     response <- handleMessage peerId request

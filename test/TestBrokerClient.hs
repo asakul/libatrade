@@ -58,7 +58,7 @@ testBrokerClientStartStop = testCase "Broker client: submit order" $ withContext
   ep <- makeEndpoint
   (mockBroker, broState) <- mkMockBroker ["demo"]
   bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
-    bracket (startBrokerClient ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
+    bracket (startBrokerClient "foo" ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
       oid <- submitOrder broC defaultOrder
       case oid of
         Left err -> assertFailure "Invalid response"
@@ -68,7 +68,7 @@ testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" 
   ep <- makeEndpoint
   (mockBroker, broState) <- mkMockBroker ["demo"]
   bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
-    bracket (startBrokerClient ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
+    bracket (startBrokerClient "foo" ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
       maybeOid <- submitOrder broC defaultOrder
       case maybeOid of
         Left err -> assertFailure "Invalid response"
@@ -83,7 +83,7 @@ testBrokerClientGetNotifications = testCase "Broker client: get notifications" $
   ep <- makeEndpoint
   (mockBroker, broState) <- mkMockBroker ["demo"]
   bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
-    bracket (startBrokerClient ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
+    bracket (startBrokerClient "foo" ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
       maybeOid <- submitOrder broC defaultOrder
       case maybeOid of
         Left err -> assertFailure "Invalid response"
