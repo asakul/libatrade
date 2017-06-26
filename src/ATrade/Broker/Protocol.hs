@@ -7,7 +7,8 @@ module ATrade.Broker.Protocol (
   notificationOrderId,
   RequestSqnum(..),
   requestSqnum,
-  TradeSinkMessage(..)
+  TradeSinkMessage(..),
+  mkTradeMessage
 ) where
 
 import Control.Error.Util
@@ -122,6 +123,20 @@ data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {
   tsExecutionTime :: UTCTime,
   tsSignalId :: SignalId
 } deriving (Show, Eq)
+
+mkTradeMessage trade = TradeSinkTrade {
+  tsAccountId = tradeAccount trade,
+  tsSecurity = tradeSecurity trade,
+  tsPrice = (toDouble . tradePrice) trade,
+  tsQuantity = (fromInteger . tradeQuantity) trade,
+  tsVolume = (toDouble . tradeVolume) trade,
+  tsCurrency = tradeVolumeCurrency trade,
+  tsOperation = tradeOperation trade,
+  tsExecutionTime = tradeTimestamp trade,
+  tsSignalId = tradeSignalId trade
+}
+  where
+    toDouble = fromRational . toRational
 
 getHMS :: UTCTime -> (Int, Int, Int, Int)
 getHMS (UTCTime _ diff) = (intsec `div` 3600, (intsec `mod` 3600) `div` 60, intsec `mod` 60, msec)

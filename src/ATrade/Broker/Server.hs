@@ -3,7 +3,8 @@
 module ATrade.Broker.Server (
   startBrokerServer,
   stopBrokerServer,
-  BrokerInterface(..)
+  BrokerInterface(..),
+  TradeSink
 ) where
 
 import ATrade.Types
@@ -55,8 +56,10 @@ data BrokerServerState = BrokerServerState {
 
 data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar ())
 
-startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> T.Text -> ServerSecurityParams -> IO BrokerServerHandle
-startBrokerServer brokers c ep tradeSinkEp params = do
+type TradeSink = Trade -> IO ()
+
+startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> [TradeSink] -> ServerSecurityParams -> IO BrokerServerHandle
+startBrokerServer brokers c ep tradeSinks params = do
   sock <- socket c Router
   setLinger (restrict 0) sock
   case sspDomain params of
@@ -87,10 +90,11 @@ startBrokerServer brokers c ep tradeSinkEp params = do
   mapM_ (\bro -> setNotificationCallback bro (Just $ notificationCallback state)) brokers
 
   debugM "Broker.Server" "Forking broker server thread"
-  BrokerServerHandle <$> forkIO (brokerServerThread state) <*> forkIO (tradeSinkHandler c state tradeSinkEp) <*> pure compMv <*> pure killMv
+  BrokerServerHandle <$> forkIO (brokerServerThread state) <*> forkIO (tradeSinkHandler c state tradeSinks) <*> pure compMv <*> pure killMv
 
 notificationCallback :: IORef BrokerServerState -> Notification -> IO ()
 notificationCallback state n = do
+  debugM "Broker.Server" $ "Notification: " ++ show n
   chan <- tradeSink <$> readIORef state
   case n of
     TradeNotification trade -> tryWriteChan chan trade
@@ -106,52 +110,17 @@ notificationCallback state n = do
         Just ns -> s { pendingNotifications = M.insert peerId (n : ns) (pendingNotifications s)}
         Nothing -> s { pendingNotifications = M.insert peerId [n] (pendingNotifications s)})
 
-tradeSinkHandler :: Context -> IORef BrokerServerState -> T.Text -> IO ()
-tradeSinkHandler c state tradeSinkEp = when (tradeSinkEp /= "") $
-    whileM_ (not <$> wasKilled) $
-      handle (\e -> do
-          warningM "Broker.Server" $ "Trade sink: exception: " ++ (show (e :: SomeException)) ++ "; isZMQ: " ++ show (isZMQError e)
-          when (isZMQError e) $ do
-              debugM "Broker.Server" "Rethrowing exception"
-              throwIO e) $ withSocket c Dealer (\sock -> do
-        debugM "Broker.Server" "Connecting trade sink socket"
-        chan <- tradeSink <$> readIORef state
-        connect sock $ T.unpack tradeSinkEp
-        timeoutMv <- newIORef False
-        threadDelay 1000000
-        whileM_ (andM [not <$> wasKilled, not <$> readIORef timeoutMv]) $ do
-          maybeTrade <- tryReadChan chan
-          case maybeTrade of
-            Just trade -> do
-              sendMulti sock $ B.empty :| [encodeTrade trade]
-              _ <- receiveMulti sock
-              return ()
-            Nothing -> do
-              threadDelay 1000000
-              sendMulti sock $ B.empty :| [BL.toStrict $ encode TradeSinkHeartBeat]
-              events <- poll 5000 [Sock sock [In] Nothing]
-              if not . L.null . L.head $ events
-                then void . receive $ sock -- anything will do
-                else do
-                  writeIORef timeoutMv True
-                  warningM "Broker.Server" "Trade sink timeout")
-
+tradeSinkHandler :: Context -> IORef BrokerServerState -> [TradeSink] -> IO ()
+tradeSinkHandler c state tradeSinks = unless (null tradeSinks) $
+    whileM_ (not <$> wasKilled) $ do
+      chan <- tradeSink <$> readIORef state
+      maybeTrade <- tryReadChan chan
+      case maybeTrade of
+        Just trade -> mapM_ (\x -> x trade) tradeSinks
+        Nothing -> return ()
     where
-      isZMQError e = "ZMQError" `L.isPrefixOf` show e
-      wasKilled = fmap killMvar (readIORef state) >>= fmap isJust . tryReadMVar
-      encodeTrade :: Trade -> B.ByteString
-      encodeTrade = BL.toStrict . encode . convertTrade
-      convertTrade trade = TradeSinkTrade {
-        tsAccountId = tradeAccount trade,
-        tsSecurity = tradeSecurity trade,
-        tsPrice = fromRational . toRational . tradePrice $ trade,
-        tsQuantity = fromInteger $ tradeQuantity trade,
-        tsVolume = fromRational . toRational . tradeVolume $ trade,
-        tsCurrency = tradeVolumeCurrency trade,
-        tsOperation = tradeOperation trade,
-        tsExecutionTime = tradeTimestamp trade,
-        tsSignalId = tradeSignalId trade
-      }
+      wasKilled = isJust <$> (killMvar <$> readIORef state >>= tryReadMVar)
+
 
 brokerServerThread :: IORef BrokerServerState -> IO ()
 brokerServerThread state = finally brokerServerThread' cleanup

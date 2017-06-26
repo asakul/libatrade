@@ -5,6 +5,7 @@ import qualified TestBrokerProtocol
 import qualified TestBrokerServer
 import qualified TestQuoteSourceClient
 import qualified TestQuoteSourceServer
+import qualified TestZMQTradeSink
 
 import Test.Tasty
 
@@ -19,5 +20,6 @@ unitTests = testGroup "Unit-tests" [
     TestQuoteSourceClient.unitTests
   , TestQuoteSourceServer.unitTests
   , TestBrokerServer.unitTests
-  , TestBrokerClient.unitTests]
+  , TestBrokerClient.unitTests
+  , TestZMQTradeSink.unitTests ]
 

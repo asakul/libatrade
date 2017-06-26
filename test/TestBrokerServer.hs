@@ -68,20 +68,28 @@ defaultOrder = mkOrder {
     orderOperation = Buy
   }
 
+makeTestTradeSink :: IO (IORef (Maybe Trade), TradeSink)
+makeTestTradeSink = do
+  ref <- newIORef Nothing
+  return (ref, f ref)
+  where
+    f ref t = writeIORef ref $ Just t
+      
+
 --
 -- Tests
 --
 
 testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
   ep <- toText <$> UV4.nextRandom
-  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep) "" defaultServerSecurityParams
+  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep) [] defaultServerSecurityParams
   stopBrokerServer broS)
 
 testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS -> do
+  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\broS -> do
     withSocket ctx Req (\sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
@@ -103,7 +111,7 @@ testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server retur
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock (defaultOrder { orderAccountId = "foobar" }) ep
 
@@ -121,7 +129,7 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
@@ -147,7 +155,7 @@ testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancell
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock defaultOrder ep
         receive sock
@@ -169,7 +177,7 @@ testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         step "Connecting"
         connect sock (T.unpack ep)
@@ -193,7 +201,7 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS ->
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\broS ->
       withSocket ctx Req (\sock -> do
         -- We have to actually submit order, or else server won't know that we should
         -- be notified about this order
@@ -256,7 +264,7 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
   putStrLn "delta"
-  bracket (startBrokerServer [mockBroker] ctx ep "" defaultServerSecurityParams) stopBrokerServer (\broS -> do
+  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\broS -> do
     putStrLn "gamma"
     withSocket ctx Req (\sock -> do
       putStrLn "alpha"
@@ -287,35 +295,32 @@ testBrokerServerTradeSink = testCaseSteps "Broker Server: sends trades to trade 
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  withSocket ctx Rep (\tradeSock -> do
-    bind tradeSock "inproc://trade-sink"
-    setReceiveTimeout (restrict 1000) tradeSock
-    bracket (startBrokerServer [mockBroker] ctx ep "inproc://trade-sink" defaultServerSecurityParams) stopBrokerServer (\broS -> do
-      withSocket ctx Req (\sock -> do
-        step "Connecting"
-        connectAndSendOrder step sock defaultOrder ep
-        (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+  (tradeRef, sink) <- makeTestTradeSink
+  bracket (startBrokerServer [mockBroker] ctx ep [sink] defaultServerSecurityParams) stopBrokerServer (\broS -> do
+    withSocket ctx Req (\sock -> do
+      step "Connecting"
+      connectAndSendOrder step sock defaultOrder ep
+      (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
 
-        (Just cb) <- notificationCallback <$> readIORef broState
-        let trade = Trade {
-          tradeOrderId = orderId,
-          tradePrice = 19.82,
-          tradeQuantity = 1,
-          tradeVolume = 1982,
-          tradeVolumeCurrency = "TEST_CURRENCY",
-          tradeOperation = Buy,
-          tradeAccount = "demo",
-          tradeSecurity = "FOO",
-          tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
-          tradeSignalId = SignalId "Foo" "bar" "baz" }
-        cb (TradeNotification trade)
+      (Just cb) <- notificationCallback <$> readIORef broState
+      let trade = Trade {
+        tradeOrderId = orderId,
+        tradePrice = 19.82,
+        tradeQuantity = 1,
+        tradeVolume = 1982,
+        tradeVolumeCurrency = "TEST_CURRENCY",
+        tradeOperation = Buy,
+        tradeAccount = "demo",
+        tradeSecurity = "FOO",
+        tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
+        tradeSignalId = SignalId "Foo" "bar" "baz" }
+      cb (TradeNotification trade)
 
-        threadDelay 100000
-        step "Testing"
-        tradeMsg <- receive tradeSock
-        case decode . BL.fromStrict $ tradeMsg of
-          Just tsTrade@TradeSinkTrade{..} -> do
-            tsAccountId @?= tradeAccount trade
-            tsPrice @?= (fromRational . toRational . tradePrice) trade
-          _ -> assertFailure "Invalid trade in sink"
-        ))))
+      threadDelay 100000
+      step "Testing"
+      maybeTrade <- readIORef tradeRef
+      case maybeTrade of
+        Just trade' -> do
+          trade' @?= trade
+        _ -> assertFailure "Invalid trade in sink"
+      )))
