@@ -16,7 +16,6 @@ import ArbitraryInstances
 
 import Data.Aeson
 import Data.Aeson.Types
-import Data.Decimal
 import Data.Scientific
 import Data.Text
 import Data.Time.Calendar

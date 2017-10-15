@@ -15,7 +15,6 @@ import ATrade.Price as P
 import ATrade.Broker.Protocol
 
 import Data.Int
-import Data.Decimal
 import Data.Scientific
 import Data.Time.Clock
 import Data.Time.Calendar
@@ -41,9 +40,6 @@ instance Arbitrary Tick where
 
 instance Arbitrary DataType where
   arbitrary = toEnum <$> choose (1, 10)
-
-instance Arbitrary Decimal where
-  arbitrary = realFracToDecimal 10 <$> (arbitrary :: Gen Scientific)
 
 instance Arbitrary SignalId where
   arbitrary = SignalId <$> arbitrary <*> arbitrary <*> arbitrary

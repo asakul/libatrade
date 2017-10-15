@@ -15,7 +15,6 @@ import ATrade.Broker.Protocol
 import ArbitraryInstances
 
 import Data.Aeson
-import Data.Decimal
 import Data.Scientific
 
 properties = testGroup "Broker.Protocol" [

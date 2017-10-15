@@ -36,7 +36,6 @@ import Data.Binary.Builder
 import Data.Binary.Get
 import Data.ByteString.Lazy as B
 import Data.DateTime
-import Data.Decimal
 import Data.Int
 import Data.List as L
 import Data.Maybe
@@ -138,14 +137,6 @@ parseTick = do
     makeTimestamp :: Word64 -> Word32 -> UTCTime
     makeTimestamp sec usec = addUTCTime (fromRational $ toInteger usec % 1000000) (fromSeconds . toInteger $ sec)
 
-    makeValue :: Int64 -> Int32 -> Decimal
-    makeValue intpart nanopart = case eitherFromRational r of
-      Right v -> v + convertedIntPart
-      Left _ -> convertedIntPart
-      where
-        convertedIntPart = realFracToDecimal 10 (fromIntegral intpart) 
-        r = toInteger nanopart % 1000000000
-
 deserializeTick :: [ByteString] -> Maybe Tick
 deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
   Left (_, _, _) -> Nothing
@@ -161,10 +152,10 @@ deserializeTickBody bs = case runGetOrFail parseTick bs of
 data Bar = Bar {
   barSecurity :: !TickerId,
   barTimestamp :: !UTCTime,
-  barOpen :: !Decimal,
-  barHigh :: !Decimal,
-  barLow :: !Decimal,
-  barClose :: !Decimal,
+  barOpen :: !Price,
+  barHigh :: !Price,
+  barLow :: !Price,
+  barClose :: !Price,
   barVolume :: !Integer
 } deriving (Show, Eq, Generic)
 
@@ -186,30 +177,28 @@ instance ToJSON SignalId where
     "signal-name" .= signalName sid,
     "comment" .= comment sid ]
 
-instance FromJSON Decimal where
-  parseJSON = withScientific "number" (return . realFracToDecimal 10 . toRational) 
-
-instance ToJSON Decimal where
-  toJSON = Number . fromRational . toRational
-
-data OrderPrice = Market | Limit Decimal | Stop Decimal Decimal | StopMarket Decimal
+data OrderPrice = Market | Limit Price | Stop Price Price | StopMarket Price
   deriving (Show, Eq)
-
-decimal :: (RealFrac r) => r -> Decimal
-decimal = realFracToDecimal 10
 
 instance FromJSON OrderPrice where
   parseJSON (String s) = when (s /= "market") (fail "If string, then should be 'market'") >>
     return Market
 
-  parseJSON (Number n) = return $ Limit $ decimal n
+  parseJSON a@(Number n) = do
+    price <- parseJSON a
+    return $ Limit price
   parseJSON (Object v) = do
-    triggerPrice <- v .: "trigger" :: Parser Double
-    execPrice <- v .: "execution"
-    case execPrice of
-      (String s) -> when (s /= "market") (fail "If string, then should be 'market'") >> return $ StopMarket (decimal triggerPrice)
-      (Number n) -> return $ Stop (decimal triggerPrice) (decimal n)
-      _ -> fail "Should be either number or 'market'"
+    triggerPrice <- v .: "trigger"
+    case triggerPrice of
+      a@(Number trpr) -> do
+        trprice <- parseJSON a
+        execPrice <- v .: "execution"
+        case execPrice of
+          (String s) -> if s /= "market"
+              then (fail "If string, then should be 'market'") 
+              else return $ StopMarket trprice
+          (Number n) -> return $ Stop trprice (fromScientific n)
+          _ -> fail "Should be either number or 'market'"
 
   parseJSON _ = fail "OrderPrice"
 
@@ -321,9 +310,9 @@ instance ToJSON Order where
 
 data Trade = Trade {
   tradeOrderId :: OrderId,
-  tradePrice :: Decimal,
+  tradePrice :: Price,
   tradeQuantity :: Integer,
-  tradeVolume :: Decimal,
+  tradeVolume :: Price,
   tradeVolumeCurrency :: T.Text,
   tradeOperation :: Operation,
   tradeAccount :: T.Text,
@@ -384,6 +373,6 @@ data TickerInfo = TickerInfo {
   tiClass :: T.Text,
   tiBase :: Maybe TickerId,
   tiLotSize :: Integer,
-  tiTickSize :: Decimal
+  tiTickSize :: Price
 } deriving (Show, Eq)
 
