@@ -21,10 +21,13 @@ module ATrade.Types (
   ServerSecurityParams(..),
   defaultServerSecurityParams,
   ClientSecurityParams(..),
-  defaultClientSecurityParams
+  defaultClientSecurityParams,
+  module ATrade.Price
 ) where
 
 import GHC.Generics
+
+import ATrade.Price
 
 import Control.Monad
 import Data.Aeson
