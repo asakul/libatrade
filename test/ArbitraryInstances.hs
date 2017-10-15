@@ -120,4 +120,5 @@ instance Arbitrary BrokerServerResponse where
        | t == 4 -> ResponseError <$> arbitrary
 
 instance Arbitrary P.Price where
-  arbitrary = P.Price <$> arbitrary
+  arbitrary = P.Price <$> (arbitrary `suchThat` (\p -> abs p < 1000000000 * 10000000))
+

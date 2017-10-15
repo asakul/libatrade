@@ -49,7 +49,7 @@ import System.ZMQ4.ZAP
 type TickerId = T.Text
 
 data DataType = Unknown
-  | Price
+  | LastTradePrice
   | OpenInterest
   | BestBid
   | BestOffer
@@ -62,7 +62,7 @@ data DataType = Unknown
 
 instance Enum DataType where
   fromEnum x
-    | x == Price = 1
+    | x == LastTradePrice = 1
     | x == OpenInterest = 3
     | x == BestBid = 4
     | x == BestOffer = 5
@@ -75,7 +75,7 @@ instance Enum DataType where
     | otherwise = -1
 
   toEnum x
-    | x == 1 = Price
+    | x == 1 = LastTradePrice
     | x == 3 = OpenInterest
     | x == 4 = BestBid
     | x == 5 = BestOffer
