@@ -17,6 +17,7 @@ library
   hs-source-dirs:      src
   ghc-options:         -Wincomplete-patterns
   exposed-modules:     ATrade.Types
+                     , ATrade.Price
                      , ATrade.QuoteSource.Client
                      , ATrade.QuoteSource.Server
                      , ATrade.Broker.Client

@@ -11,8 +11,10 @@ import Test.Tasty.QuickCheck as QC
 import Test.QuickCheck.Instances hiding (Text)
 
 import ATrade.Types
+import ATrade.Price as P
 import ATrade.Broker.Protocol
 
+import Data.Int
 import Data.Decimal
 import Data.Scientific
 import Data.Time.Clock
@@ -117,3 +119,5 @@ instance Arbitrary BrokerServerResponse where
        | t == 3 -> ResponseNotifications <$> arbitrary
        | t == 4 -> ResponseError <$> arbitrary
 
+instance Arbitrary P.Price where
+  arbitrary = P.Price <$> arbitrary

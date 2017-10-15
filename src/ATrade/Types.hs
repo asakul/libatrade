@@ -163,7 +163,7 @@ data Bar = Bar {
   barLow :: !Decimal,
   barClose :: !Decimal,
   barVolume :: !Integer
-} deriving (Show, Eq)
+} deriving (Show, Eq, Generic)
 
 data SignalId = SignalId {
   strategyId :: T.Text,

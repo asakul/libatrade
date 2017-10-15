@@ -11,6 +11,7 @@ import Test.Tasty.QuickCheck as QC
 import Test.Tasty.HUnit
 
 import ATrade.Types
+import ATrade.Price as P
 import ArbitraryInstances
 
 import Data.Aeson
@@ -32,6 +33,8 @@ properties = testGroup "Types" [
   , testOrderStateSerialization
   , testOrderSerialization
   , testTradeSerialization
+  , testPrice1
+  , testPrice2
   ]
 
 testTickSerialization = QC.testProperty "Deserialize serialized tick"
@@ -80,3 +83,12 @@ testTradeSerialization = QC.testProperty "Deserialize serialized Trade"
   (\v -> case (decode . encode $ v :: Maybe Trade) of
     Just s -> s == v
     Nothing -> False)
+
+testPrice1 = QC.testProperty "fromDouble . toDouble $ Price"
+  (\p -> let newp = (P.fromDouble . P.toDouble) p in
+    (abs (priceQuants newp - priceQuants p) < 1000))
+
+testPrice2 = QC.testProperty "toDouble . fromDouble $ Price" $
+  QC.forAll (arbitrary `suchThat` (< 1000000000)) (\d -> let newd = (P.toDouble . P.fromDouble) d in
+    (abs (newd - d) < 0.000001))
+
