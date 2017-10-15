@@ -3,7 +3,8 @@
 module ATrade.Price (
   Price(..),
   fromDouble,
-  toDouble
+  toDouble,
+  decompose
 ) where
 
 import Data.Int
@@ -35,3 +36,7 @@ toDouble p = fromIntegral (priceQuants p) / fromIntegral giga
 
 fromDouble :: Double -> Price
 fromDouble d = Price { priceQuants = truncate (d * fromIntegral giga) }
+
+decompose :: Price -> (Int64, Int32)
+decompose Price{priceQuants = p} = (p `div` giga, (fromInteger . toInteger) $ p `mod` giga)
+

@@ -35,6 +35,7 @@ properties = testGroup "Types" [
   , testTradeSerialization
   , testPrice1
   , testPrice2
+  , testPriceDecompose
   ]
 
 testTickSerialization = QC.testProperty "Deserialize serialized tick"
@@ -91,4 +92,8 @@ testPrice1 = QC.testProperty "fromDouble . toDouble $ Price"
 testPrice2 = QC.testProperty "toDouble . fromDouble $ Price" $
   QC.forAll (arbitrary `suchThat` (< 1000000000)) (\d -> let newd = (P.toDouble . P.fromDouble) d in
     (abs (newd - d) < 0.000001))
+
+testPriceDecompose = QC.testProperty "Price decompose"
+  (\p -> let (i, f) = decompose p in
+    i * 1000000000 + (fromInteger . fromIntegral) f == priceQuants p)
 
