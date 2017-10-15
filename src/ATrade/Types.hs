@@ -93,7 +93,7 @@ data Tick = Tick {
   security :: !T.Text,
   datatype :: !DataType,
   timestamp :: !UTCTime,
-  value :: !Decimal,
+  value :: !Price,
   volume :: !Integer
 } deriving (Show, Eq, Generic)
 
@@ -106,8 +106,8 @@ serializeTickBody tick = toLazyByteString $ mconcat [
       putWord64le $ fromIntegral . toSeconds' . timestamp $ tick,
       putWord32le $ fromIntegral . fracSeconds . timestamp $ tick,
       putWord32le $ fromIntegral . fromEnum . datatype $ tick,
-      putWord64le $ truncate . value $ tick,
-      putWord32le $ truncate . (*. 1000000000) . fractionalPart $ value tick,
+      putWord64le $ fromInteger . toInteger . fst . decompose . value $ tick,
+      putWord32le $ (* 1000) . fromInteger . toInteger . snd . decompose . value $ tick,
       putWord32le $ fromIntegral $ volume tick ]
   where
     fractionalPart :: (RealFrac a) => a -> a
@@ -132,7 +132,7 @@ parseTick = do
   return Tick { security = "",
     datatype = dt,
     timestamp = makeTimestamp tsec tusec,
-    value = makeValue intpart nanopart,
+    value = compose (intpart, nanopart `div` 1000),
     volume = volume }
   where
     makeTimestamp :: Word64 -> Word32 -> UTCTime

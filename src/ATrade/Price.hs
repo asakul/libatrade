@@ -4,7 +4,8 @@ module ATrade.Price (
   Price(..),
   fromDouble,
   toDouble,
-  decompose
+  decompose,
+  compose
 ) where
 
 import Data.Int
@@ -42,4 +43,7 @@ fromDouble d = Price { priceQuants = truncate (d * fromIntegral mega) }
 
 decompose :: Price -> (Int64, Int32)
 decompose Price{priceQuants = p} = (p `div` mega, (fromInteger . toInteger) $ p `mod` mega)
+
+compose :: (Int64, Int32) -> Price
+compose (int, frac) = Price { priceQuants = int * mega + (fromInteger . toInteger) frac }
 

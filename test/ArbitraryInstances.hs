@@ -20,14 +20,14 @@ import Data.Scientific
 import Data.Time.Clock
 import Data.Time.Calendar
 
-notTooBig x = abs x < 1000000000000
+notTooBig x = abs x < 100000000
 
 instance Arbitrary Tick where
   arbitrary = Tick <$>
     arbitrary <*>
     arbitrary <*>
     arbitraryTimestamp <*>
-    (roundTo 9 <$> (arbitrary `suchThat` notTooBig)) <*>
+    arbitrary <*>
     arbitrary
     where
       arbitraryTimestamp = do
