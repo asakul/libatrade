@@ -38,7 +38,7 @@ testTickStream = testCase "QuoteSource Server sends ticks" $ withContext (\ctx -
       subscribe s "FOOBAR"
       let tick = Tick {
           security = "FOOBAR",
-          datatype = Price,
+          datatype = LastTradePrice,
           timestamp = UTCTime (fromGregorian 2016 9 27) 16000,
           value = 1000,
           volume = 1}

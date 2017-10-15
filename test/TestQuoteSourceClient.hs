@@ -48,7 +48,7 @@ testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\c
     bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep) stopQuoteSourceClient (\qc -> do
       let tick = Tick {
           security = "FOOBAR",
-          datatype = Price,
+          datatype = LastTradePrice,
           timestamp = UTCTime (fromGregorian 2016 9 27) 16000,
           value = 1000,
           volume = 1}
