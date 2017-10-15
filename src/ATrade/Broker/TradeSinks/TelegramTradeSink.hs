@@ -41,14 +41,16 @@ sinkThread apitoken chatId killMv chan = do
   man <- newManager $ mkManagerSettings tlsSettings Nothing
   whileM_ (not <$> wasKilled) $ do
     maybeTrade <- BC.tryReadChan chan
-    whenJust maybeTrade (\trade -> sendMessage man apitoken chatId $ format "Trade: {} {} of {} at {} for {} ({}/{})"
+    case maybeTrade of
+      Just trade -> sendMessage man apitoken chatId $ format "Trade: {} {} of {} at {} for {} ({}/{})"
         (show (tradeOperation trade),
           show (tradeQuantity trade),
           tradeSecurity trade,
           show (tradePrice trade),
           tradeAccount trade,
           (strategyId . tradeSignalId) trade,
-          (signalName . tradeSignalId) trade))
+          (signalName . tradeSignalId) trade)
+      Nothing -> threadDelay 1000000
   where
     tlsSettings = TLSSettingsSimple { settingDisableCertificateValidation = True, settingDisableSession = False, settingUseServerName = False }
     wasKilled = isJust <$> tryReadMVar killMv

@@ -117,7 +117,7 @@ tradeSinkHandler c state tradeSinks = unless (null tradeSinks) $
       maybeTrade <- tryReadChan chan
       case maybeTrade of
         Just trade -> mapM_ (\x -> x trade) tradeSinks
-        Nothing -> return ()
+        Nothing -> threadDelay 1000000
     where
       wasKilled = isJust <$> (killMvar <$> readIORef state >>= tryReadMVar)
 
