@@ -199,6 +199,7 @@ instance FromJSON OrderPrice where
               else return $ StopMarket trprice
           (Number n) -> return $ Stop trprice (fromScientific n)
           _ -> fail "Should be either number or 'market'"
+      _ -> fail "Should be a number"
 
   parseJSON _ = fail "OrderPrice"
 
