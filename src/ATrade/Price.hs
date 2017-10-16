@@ -18,7 +18,7 @@ import Data.Scientific
 
 data Price = Price {
   priceQuants :: !Int64
-} deriving (Eq, Show, Ord)
+} deriving (Eq, Ord)
 
 giga :: Int64
 giga = 1000000000
@@ -74,3 +74,7 @@ instance Real Price where
 instance Fractional Price where
   fromRational a = fromInteger (numerator a) / fromInteger (denominator a)
   a / b = fromDouble $ toDouble a / toDouble b
+
+instance Show Price where
+  show = show . toDouble
+
