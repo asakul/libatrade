@@ -319,6 +319,7 @@ data Trade = Trade {
   tradeAccount :: T.Text,
   tradeSecurity :: T.Text,
   tradeTimestamp :: UTCTime,
+  tradeCommission :: Price,
   tradeSignalId :: SignalId }
   deriving (Show, Eq)
 
@@ -333,6 +334,7 @@ instance FromJSON Trade where
     trade .: "account"              <*>
     trade .: "security"             <*>
     trade .: "execution-time"       <*>
+    trade .:? "commission" .!= 0    <*>
     trade .: "signal-id"
   parseJSON _ = fail "Should be object"
 
@@ -346,6 +348,7 @@ instance ToJSON Trade where
     "account" .= tradeAccount trade,
     "security" .= tradeSecurity trade,
     "execution-time" .= tradeTimestamp trade,
+    "commission" .= tradeCommission trade,
     "signal-id" .= tradeSignalId trade]
 
 data ServerSecurityParams = ServerSecurityParams {
