@@ -140,7 +140,9 @@ brokerServerThread state = finally brokerServerThread' cleanup
                 lastPackMap <- lastPacket <$> readIORef state
                 case shouldResend sqnum peerId lastPackMap of
                   Just response -> do
+                    debugM "Broker.Server" $ "Resending packet for peerId: " ++ show peerId
                     sendMessage sock peerId response -- Resend
+                    atomicMapIORef state (\s -> s { lastPacket = M.delete peerId (lastPacket s)})
                   Nothing -> do
                     -- Handle incoming request, send response
                     response <- handleMessage peerId request

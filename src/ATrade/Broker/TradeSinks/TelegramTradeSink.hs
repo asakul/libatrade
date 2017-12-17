@@ -65,6 +65,7 @@ sinkThread apitoken chatId killMv chan = do
       tsCurrency = tradeVolumeCurrency trade,
       tsOperation = tradeOperation trade,
       tsExecutionTime = tradeTimestamp trade,
+      tsCommission = toDouble (tradeCommission trade),
       tsSignalId = tradeSignalId trade
     }
 

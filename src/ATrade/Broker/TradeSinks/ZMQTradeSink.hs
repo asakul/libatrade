@@ -71,6 +71,7 @@ sinkThread ctx tradeSinkEp killMv chan = whileM_ (not <$> wasKilled) $
       tsCurrency = tradeVolumeCurrency trade,
       tsOperation = tradeOperation trade,
       tsExecutionTime = tradeTimestamp trade,
+      tsCommission = toDouble (tradeCommission trade),
       tsSignalId = tradeSignalId trade
     }
 

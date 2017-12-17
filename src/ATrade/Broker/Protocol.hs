@@ -121,6 +121,7 @@ data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {
   tsCurrency :: T.Text,
   tsOperation :: Operation,
   tsExecutionTime :: UTCTime,
+  tsCommission :: Double,
   tsSignalId :: SignalId
 } deriving (Show, Eq)
 
@@ -133,6 +134,7 @@ mkTradeMessage trade = TradeSinkTrade {
   tsCurrency = tradeVolumeCurrency trade,
   tsOperation = tradeOperation trade,
   tsExecutionTime = tradeTimestamp trade,
+  tsCommission = toDouble $ tradeCommission trade,
   tsSignalId = tradeSignalId trade
 }
   where
@@ -182,6 +184,7 @@ instance ToJSON TradeSinkMessage where
     "volume-currency" .= tsCurrency,
     "operation" .= tsOperation,
     "execution-time" .= formatTimestamp tsExecutionTime,
+    "commission" .= tsCommission,
     "strategy" .= strategyId tsSignalId,
     "signal-id" .= signalName tsSignalId,
     "comment" .= comment tsSignalId]]
@@ -201,6 +204,7 @@ instance FromJSON TradeSinkMessage where
           vol <- v .: "volume"
           cur <- v .: "volume-currency"
           op <- v .: "operation"
+          commission <- v .:? "commission" .!= 0
           extime <- v .: "execution-time" >>= parseTimestamp
           strategy <- v .: "strategy"
           sid <- v .: "signal-id"
@@ -214,5 +218,6 @@ instance FromJSON TradeSinkMessage where
             tsCurrency = cur,
             tsOperation = op,
             tsExecutionTime = extime,
+            tsCommission = commission,
             tsSignalId = SignalId strategy sid com }
         _ -> fail "Should've been trade object"

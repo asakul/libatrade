@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module ATrade.Price (
   Price(..),
@@ -15,6 +16,9 @@ import Data.Ratio
 
 import Data.Aeson
 import Data.Scientific
+
+import qualified Data.Text as T
+import Text.Printf
 
 data Price = Price {
   priceQuants :: !Int64
@@ -76,5 +80,5 @@ instance Fractional Price where
   a / b = fromDouble $ toDouble a / toDouble b
 
 instance Show Price where
-  show = show . toDouble
+  show = printf "%.8f" . toDouble
 
