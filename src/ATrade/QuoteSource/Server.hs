@@ -20,6 +20,7 @@ import Data.List.NonEmpty hiding (map)
 import Data.Maybe
 import System.Log.Logger
 import System.ZMQ4
+import System.ZMQ4.ZAP
 import Prelude hiding ((!!))
 
 import Safe
@@ -79,10 +80,13 @@ serverThread state = do
         header = BL.fromStrict . E.encodeUtf8 $ secName
         body = BL.concat $ map serializeTickBody ticklist
 
-startQuoteSourceServer :: BoundedChan QuoteSourceServerData -> Context -> T.Text -> IO QuoteSourceServer
-startQuoteSourceServer chan c ep = do
+startQuoteSourceServer :: BoundedChan QuoteSourceServerData -> Context -> T.Text -> Maybe DomainId -> IO QuoteSourceServer
+startQuoteSourceServer chan c ep socketDomainIdMb = do
   sock <- socket c Pub
   setLinger (restrict 0) sock
+  case socketDomainIdMb of
+    Just socketDomainId -> setZapDomain socketDomainId sock
+    _ -> return ()
   bind sock $ T.unpack ep
   tid <- myThreadId
   hbTid <- forkIO $ forever $ do
