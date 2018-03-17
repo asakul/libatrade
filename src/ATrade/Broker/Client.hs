@@ -57,7 +57,6 @@ brokerClientThread socketIdentity ctx ep cmd resp comp killMv secParams = finall
             else do
               putMVar resp (ResponseError "Response error")) $ withSocket ctx Req (\sock -> do
         setLinger (restrict 0) sock
-        setIdentity(restrict socketIdentity) sock
         debugM "Broker.Client" $ "Connecting to: " ++ show (T.unpack ep)
         case cspCertificate secParams of
           Just clientCert -> zapApplyCertificate clientCert sock
@@ -97,9 +96,9 @@ startBrokerClient socketIdentity ctx endpoint secParams = do
     tid = tid,
     completionMvar = compMv,
     killMvar = killMv,
-    submitOrder = bcSubmitOrder idCounter cmdVar respVar,
-    cancelOrder = bcCancelOrder idCounter cmdVar respVar,
-    getNotifications = bcGetNotifications idCounter cmdVar respVar,
+    submitOrder = bcSubmitOrder (decodeUtf8 socketIdentity) idCounter cmdVar respVar,
+    cancelOrder = bcCancelOrder (decodeUtf8 socketIdentity) idCounter cmdVar respVar,
+    getNotifications = bcGetNotifications (decodeUtf8 socketIdentity) idCounter cmdVar respVar,
     cmdVar = cmdVar,
     respVar = respVar
   }
@@ -109,30 +108,30 @@ stopBrokerClient handle = putMVar (killMvar handle) () >> yield >> killThread (t
 
 nextId cnt = atomicModifyIORef' cnt (\v -> (v + 1, v))
 
-bcSubmitOrder :: IORef Int64 -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> Order -> IO (Either T.Text OrderId)
-bcSubmitOrder idCounter cmdVar respVar order = do
+bcSubmitOrder :: ClientIdentity -> IORef Int64 -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> Order -> IO (Either T.Text OrderId)
+bcSubmitOrder clientIdentity idCounter cmdVar respVar order = do
   sqnum <- nextId idCounter
-  putMVar cmdVar (RequestSubmitOrder sqnum order)
+  putMVar cmdVar (RequestSubmitOrder sqnum clientIdentity order)
   resp <- takeMVar respVar
   case resp of
     (ResponseOrderSubmitted oid) -> return $ Right oid
     (ResponseError msg) -> return $ Left msg
     _ -> return $ Left "Unknown error"
 
-bcCancelOrder :: IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> OrderId -> IO (Either T.Text ())
-bcCancelOrder idCounter cmdVar respVar orderId = do
+bcCancelOrder :: ClientIdentity -> IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> OrderId -> IO (Either T.Text ())
+bcCancelOrder clientIdentity idCounter cmdVar respVar orderId = do
   sqnum <- nextId idCounter
-  putMVar cmdVar (RequestCancelOrder sqnum orderId)
+  putMVar cmdVar (RequestCancelOrder sqnum clientIdentity orderId)
   resp <- takeMVar respVar
   case resp of
     (ResponseOrderCancelled oid) -> return $ Right ()
     (ResponseError msg) -> return $ Left msg
     _ -> return $ Left "Unknown error"
 
-bcGetNotifications :: IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> IO (Either T.Text [Notification])
-bcGetNotifications idCounter cmdVar respVar = do
+bcGetNotifications :: ClientIdentity -> IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> IO (Either T.Text [Notification])
+bcGetNotifications clientIdentity idCounter cmdVar respVar = do
   sqnum <- nextId idCounter
-  putMVar cmdVar (RequestNotifications sqnum)
+  putMVar cmdVar (RequestNotifications sqnum clientIdentity)
   resp <- takeMVar respVar
   case resp of
     (ResponseNotifications ns) -> return $ Right ns

@@ -8,13 +8,15 @@ module ATrade.Broker.Protocol (
   RequestSqnum(..),
   requestSqnum,
   TradeSinkMessage(..),
-  mkTradeMessage
+  mkTradeMessage,
+  ClientIdentity(..)
 ) where
 
 import Control.Error.Util
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
 import Data.Text.Format
+import Data.Text.Encoding
 import Data.Aeson
 import Data.Aeson.Types hiding (parse)
 import Data.Int
@@ -23,40 +25,45 @@ import Data.Time.Calendar
 import ATrade.Types
 import Text.Parsec
 
+type ClientIdentity = T.Text
 type RequestSqnum = Int64
 
-data BrokerServerRequest = RequestSubmitOrder RequestSqnum Order
-  | RequestCancelOrder RequestSqnum OrderId
-  | RequestNotifications RequestSqnum
+data BrokerServerRequest = RequestSubmitOrder RequestSqnum ClientIdentity Order
+  | RequestCancelOrder RequestSqnum ClientIdentity OrderId
+  | RequestNotifications RequestSqnum ClientIdentity
   deriving (Eq, Show)
 
 requestSqnum :: BrokerServerRequest -> RequestSqnum
-requestSqnum (RequestSubmitOrder sqnum _) = sqnum
-requestSqnum (RequestCancelOrder sqnum _) = sqnum
-requestSqnum (RequestNotifications sqnum) = sqnum
+requestSqnum (RequestSubmitOrder sqnum _ _) = sqnum
+requestSqnum (RequestCancelOrder sqnum _ _) = sqnum
+requestSqnum (RequestNotifications sqnum _) = sqnum
 
 instance FromJSON BrokerServerRequest where
   parseJSON = withObject "object" (\obj -> do
     sqnum <- obj .: "request-sqnum"
-    parseRequest sqnum obj)
+    clientIdentity <- obj .: "client-identity"
+    parseRequest sqnum clientIdentity obj)
     where
-      parseRequest :: RequestSqnum -> Object -> Parser BrokerServerRequest
-      parseRequest sqnum obj
+      parseRequest :: RequestSqnum -> ClientIdentity -> Object -> Parser BrokerServerRequest
+      parseRequest sqnum clientIdentity obj
         | HM.member "order" obj = do
           order <- obj .: "order"
-          RequestSubmitOrder sqnum <$> parseJSON order
+          RequestSubmitOrder sqnum clientIdentity <$> parseJSON order
         | HM.member "cancel-order" obj = do
           orderId <- obj .: "cancel-order"
-          RequestCancelOrder sqnum <$> parseJSON orderId
-        | HM.member "request-notifications" obj = return (RequestNotifications sqnum)
-      parseRequest _ _ = fail "Invalid request object"
+          RequestCancelOrder sqnum clientIdentity <$> parseJSON orderId
+        | HM.member "request-notifications" obj = return (RequestNotifications sqnum clientIdentity)
+      parseRequest _ _ _ = fail "Invalid request object"
 
 instance ToJSON BrokerServerRequest where
-  toJSON (RequestSubmitOrder sqnum order) = object ["request-sqnum" .= sqnum,
+  toJSON (RequestSubmitOrder sqnum clientIdentity order) = object ["request-sqnum" .= sqnum,
+    "client-identity" .= clientIdentity,
     "order" .= order ]
-  toJSON (RequestCancelOrder sqnum oid) = object ["request-sqnum" .= sqnum,
+  toJSON (RequestCancelOrder sqnum clientIdentity oid) = object ["request-sqnum" .= sqnum,
+    "client-identity" .= clientIdentity,
     "cancel-order" .= oid ]
-  toJSON (RequestNotifications sqnum) = object ["request-sqnum" .= sqnum,
+  toJSON (RequestNotifications sqnum clientIdentity) = object ["request-sqnum" .= sqnum,
+    "client-identity" .= clientIdentity,
     "request-notifications" .= ("" :: T.Text) ]
 
 data BrokerServerResponse = ResponseOrderSubmitted OrderId

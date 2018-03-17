@@ -44,9 +44,9 @@ data BrokerInterface = BrokerInterface {
 data BrokerServerState = BrokerServerState {
   bsSocket :: Socket Router,
   orderToBroker :: M.Map OrderId BrokerInterface,
-  orderMap :: M.Map OrderId PeerId, -- Matches 0mq client identities with corresponding orders
+  orderMap :: M.Map OrderId ClientIdentity, -- Matches 0mq client identities with corresponding orders
   lastPacket :: M.Map PeerId (RequestSqnum, BrokerServerResponse),
-  pendingNotifications :: M.Map PeerId [Notification],
+  pendingNotifications :: M.Map ClientIdentity [Notification],
   brokers :: [BrokerInterface],
   completionMvar :: MVar (),
   killMvar :: MVar (),
@@ -101,14 +101,14 @@ notificationCallback state n = do
     _ -> return False
   orders <- orderMap <$> readIORef state
   case M.lookup (notificationOrderId n) orders of
-    Just peerId -> addNotification peerId n
+    Just clientIdentity -> addNotification clientIdentity n
     Nothing -> warningM "Broker.Server" "Notification: unknown order"
 
   where
-    addNotification peerId n = atomicMapIORef state (\s ->
-      case M.lookup peerId . pendingNotifications $ s of
-        Just ns -> s { pendingNotifications = M.insert peerId (n : ns) (pendingNotifications s)}
-        Nothing -> s { pendingNotifications = M.insert peerId [n] (pendingNotifications s)})
+    addNotification clientIdentity n = atomicMapIORef state (\s ->
+      case M.lookup clientIdentity . pendingNotifications $ s of
+        Just ns -> s { pendingNotifications = M.insert clientIdentity (n : ns) (pendingNotifications s)}
+        Nothing -> s { pendingNotifications = M.insert clientIdentity [n] (pendingNotifications s)})
 
 tradeSinkHandler :: Context -> IORef BrokerServerState -> [TradeSink] -> IO ()
 tradeSinkHandler c state tradeSinks = unless (null tradeSinks) $
@@ -173,32 +173,32 @@ brokerServerThread state = finally brokerServerThread' cleanup
     handleMessage peerId request = do
       bros <- brokers <$> readIORef state
       case request of
-        RequestSubmitOrder sqnum order -> do
+        RequestSubmitOrder sqnum clientIdentity order -> do
           debugM "Broker.Server" $ "Request: submit order:" ++ show request
           case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
               oid <- nextOrderId
               atomicMapIORef state (\s -> s {
                 orderToBroker = M.insert oid bro (orderToBroker s),
-                orderMap = M.insert oid peerId (orderMap s) })
+                orderMap = M.insert oid clientIdentity (orderMap s) })
               submitOrder bro order { orderId = oid }
               return $ ResponseOrderSubmitted oid
 
             Nothing -> do
               debugM "Broker.Server" $ "Unknown account: " ++ T.unpack (orderAccountId order)
               return $ ResponseError "Unknown account"
-        RequestCancelOrder sqnum oid -> do
+        RequestCancelOrder sqnum clientIdentity oid -> do
           m <- orderToBroker <$> readIORef state
           case M.lookup oid m of
             Just bro -> do
               cancelOrder bro oid
               return $ ResponseOrderCancelled oid
             Nothing -> return $ ResponseError "Unknown order"
-        RequestNotifications sqnum -> do
-          maybeNs <- M.lookup peerId . pendingNotifications <$> readIORef state
+        RequestNotifications sqnum clientIdentity -> do
+          maybeNs <- M.lookup clientIdentity . pendingNotifications <$> readIORef state
           case maybeNs of
             Just ns -> do
-              atomicMapIORef state (\s -> s { pendingNotifications = M.insert peerId [] (pendingNotifications s)})
+              atomicMapIORef state (\s -> s { pendingNotifications = M.insert clientIdentity [] (pendingNotifications s)})
               return $ ResponseNotifications . L.reverse $ ns
             Nothing -> return $ ResponseNotifications []
 
