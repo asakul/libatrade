@@ -57,7 +57,7 @@ brokerClientThread socketIdentity ctx ep cmd resp comp killMv secParams = finall
             else do
               putMVar resp (ResponseError "Response error")) $ withSocket ctx Req (\sock -> do
         setLinger (restrict 0) sock
-        setIdentity (restrict socketIdentity) sock
+        setIdentity(restrict socketIdentity) sock
         debugM "Broker.Client" $ "Connecting to: " ++ show (T.unpack ep)
         case cspCertificate secParams of
           Just clientCert -> zapApplyCertificate clientCert sock
