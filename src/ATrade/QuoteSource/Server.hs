@@ -85,7 +85,7 @@ startQuoteSourceServer chan c ep socketDomainIdMb = do
   sock <- socket c Pub
   setLinger (restrict 0) sock
   case socketDomainIdMb of
-    Just socketDomainId -> setZapDomain socketDomainId sock
+    Just socketDomainId -> setZapDomain (restrict $ E.encodeUtf8 socketDomainId) sock
     _ -> return ()
   bind sock $ T.unpack ep
   tid <- myThreadId

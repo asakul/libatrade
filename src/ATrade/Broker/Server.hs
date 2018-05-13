@@ -16,6 +16,7 @@ import qualified Data.Map as M
 import qualified Data.ByteString as B hiding (putStrLn)
 import qualified Data.ByteString.Lazy as BL hiding (putStrLn)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as E
 import qualified Data.List as L
 import Data.Aeson
 import Data.Maybe
@@ -63,7 +64,7 @@ startBrokerServer brokers c ep tradeSinks params = do
   sock <- socket c Router
   setLinger (restrict 0) sock
   case sspDomain params of
-    Just domain -> setZapDomain domain sock
+    Just domain -> setZapDomain (restrict $ E.encodeUtf8 domain) sock
     Nothing -> return ()
   case sspCertificate params of
     Just cert -> do
