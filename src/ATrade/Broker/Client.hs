@@ -64,11 +64,11 @@ brokerClientThread socketIdentity ctx ep cmd resp comp killMv secParams = finall
         case cspServerCertificate secParams of
           Just serverCert -> zapSetServerCertificate serverCert sock
           Nothing -> return ()
-            
+
         connect sock $ T.unpack ep
         debugM "Broker.Client" $ "Connected"
         isTimeout <- newIORef False
-        
+
         whileM_ (andM [isNothing <$> tryReadMVar killMv, (== False) <$> readIORef isTimeout]) $ do
           request <- takeMVar cmd
           send sock [] (BL.toStrict $ encode request)

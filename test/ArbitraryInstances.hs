@@ -5,20 +5,17 @@ module ArbitraryInstances (
 ) where
 
 
-import Test.Tasty
-import Test.Tasty.SmallCheck as SC
 import Test.Tasty.QuickCheck as QC
-import Test.QuickCheck.Instances hiding (Text)
+import Test.QuickCheck.Instances ()
 
 import ATrade.Types
 import ATrade.Price as P
 import ATrade.Broker.Protocol
 
-import Data.Int
-import Data.Scientific
 import Data.Time.Clock
 import Data.Time.Calendar
 
+notTooBig :: (Num a, Ord a) => a -> Bool
 notTooBig x = abs x < 100000000
 
 instance Arbitrary Tick where
@@ -88,6 +85,7 @@ instance Arbitrary Trade where
     arbitrary <*>
     arbitrary <*>
     arbitrary <*>
+    arbitrary <*>
     arbitrary
 
 instance Arbitrary Notification where
@@ -103,9 +101,9 @@ instance Arbitrary Notification where
 instance Arbitrary BrokerServerRequest where
   arbitrary = do
     t <- choose (1, 3) :: Gen Int
-    if | t == 1 -> RequestSubmitOrder <$> arbitrary <*> arbitrary
-       | t == 2 -> RequestCancelOrder <$> arbitrary <*> arbitrary
-       | t == 3 -> RequestNotifications <$> arbitrary
+    if | t == 1 -> RequestSubmitOrder <$> arbitrary <*> arbitrary <*> arbitrary
+       | t == 2 -> RequestCancelOrder <$> arbitrary <*> arbitrary <*> arbitrary
+       | t == 3 -> RequestNotifications <$> arbitrary <*> arbitrary
 
 instance Arbitrary BrokerServerResponse where
   arbitrary = do

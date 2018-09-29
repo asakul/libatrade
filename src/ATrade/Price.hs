@@ -17,15 +17,11 @@ import Data.Ratio
 import Data.Aeson
 import Data.Scientific
 
-import qualified Data.Text as T
 import Text.Printf
 
 data Price = Price {
   priceQuants :: !Int64
 } deriving (Eq, Ord)
-
-giga :: Int64
-giga = 1000000000
 
 mega :: Int64
 mega = 1000000

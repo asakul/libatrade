@@ -5,14 +5,11 @@ module TestZMQTradeSink (
 ) where
 
 import Test.Tasty
-import Test.Tasty.SmallCheck as SC
-import Test.Tasty.QuickCheck as QC
 import Test.Tasty.HUnit
 
 import ATrade.Types
 import ATrade.Broker.Protocol
 import ATrade.Broker.TradeSinks.ZMQTradeSink
-import Control.Concurrent
 import System.ZMQ4
 import Data.Aeson
 import Data.Time.Calendar
@@ -20,8 +17,10 @@ import Data.Time.Clock
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 
+unitTests :: TestTree
 unitTests = testGroup "Broker.Server.TradeSinks.ZMQTradeSink" [ testZMQTradeSink ]
 
+testZMQTradeSink :: TestTree
 testZMQTradeSink = testCase "Test ZMQTradeSink trade serialization" $
   withContext (\ctx -> withSocket ctx Rep (\insock -> do
     bind insock "inproc://test-sink"
@@ -43,5 +42,6 @@ testZMQTradeSink = testCase "Test ZMQTradeSink trade serialization" $
       tradeAccount = "FOO",
       tradeSecurity = "BAR",
       tradeTimestamp = UTCTime (fromGregorian 1970 1 1) 0,
+      tradeCommission = 0,
       tradeSignalId = SignalId "foo" "bar" "" }
 
