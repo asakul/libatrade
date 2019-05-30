@@ -1,10 +1,16 @@
-{-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric        #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module ATrade.Types (
   TickerId,
   Tick(..),
   Bar(..),
+  serializeBar,
+  serializeBarBody,
+  deserializeBar,
+  BarTimeframe(..),
   DataType(..),
   serializeTick,
   serializeTickBody,
@@ -25,28 +31,28 @@ module ATrade.Types (
   module ATrade.Price
 ) where
 
-import GHC.Generics
+import           GHC.Generics
 
-import ATrade.Price
+import           ATrade.Price
 
-import Control.Monad
-import Data.Aeson
-import Data.Aeson.Types
-import Data.Binary.Builder
-import Data.Binary.Get
-import Data.ByteString.Lazy as B
-import Data.DateTime
-import Data.Int
-import Data.List as L
-import Data.Maybe
-import Data.Ratio
-import Data.Text as T
-import Data.Text.Encoding as E
-import Data.Time.Clock
-import Data.Time.Clock.POSIX
-import Data.Word
+import           Control.Monad
+import           Data.Aeson
+import           Data.Aeson.Types
+import           Data.Binary.Get
+import           Data.Binary.Put
+import           Data.ByteString.Lazy  as B
+import           Data.DateTime
+import           Data.Int
+import           Data.List             as L
+import           Data.Maybe
+import           Data.Ratio
+import           Data.Text             as T
+import           Data.Text.Encoding    as E
+import           Data.Time.Clock
+import           Data.Time.Clock.POSIX
+import           Data.Word
 
-import System.ZMQ4.ZAP
+import           System.ZMQ4.ZAP
 
 type TickerId = T.Text
 
@@ -89,25 +95,36 @@ instance Enum DataType where
     | otherwise = Unknown
 
 data Tick = Tick {
-  security :: !T.Text,
-  datatype :: !DataType,
+  security  :: !T.Text,
+  datatype  :: !DataType,
   timestamp :: !UTCTime,
-  value :: !Price,
-  volume :: !Integer
+  value     :: !Price,
+  volume    :: !Integer
 } deriving (Show, Eq, Generic)
+
+putPrice :: Price -> Put
+putPrice price = do
+  let (i, f) = decompose price
+  putWord64le $ fromInteger . toInteger $ i
+  putWord32le $ (* 1000) . fromInteger . toInteger $ f
+
+parsePrice :: Get Price
+parsePrice = do
+  intpart <- (fromIntegral <$> getWord64le) :: Get Int64
+  nanopart <- (fromIntegral <$> getWord32le) :: Get Int32
+  return $ compose (intpart, nanopart `div` 1000)
 
 serializeTickHeader :: Tick -> ByteString
 serializeTickHeader tick = B.fromStrict . E.encodeUtf8 $ security tick
 
 serializeTickBody :: Tick -> ByteString
-serializeTickBody tick = toLazyByteString $ mconcat [
-      putWord32le 1,
-      putWord64le $ fromIntegral . toSeconds' . timestamp $ tick,
-      putWord32le $ fromIntegral . fracSeconds . timestamp $ tick,
-      putWord32le $ fromIntegral . fromEnum . datatype $ tick,
-      putWord64le $ fromInteger . toInteger . fst . decompose . value $ tick,
-      putWord32le $ (* 1000) . fromInteger . toInteger . snd . decompose . value $ tick,
-      putWord32le $ fromIntegral $ volume tick ]
+serializeTickBody tick = runPut $ do
+      putWord32le 1
+      putWord64le $ fromIntegral . toSeconds' . timestamp $ tick
+      putWord32le $ fromIntegral . fracSeconds . timestamp $ tick
+      putWord32le $ fromIntegral . fromEnum . datatype $ tick
+      putPrice $ value tick
+      putWord32le $ fromIntegral $ volume tick
   where
     fractionalPart :: (RealFrac a) => a -> a
     fractionalPart x = x - fromIntegral (truncate x)
@@ -125,17 +142,16 @@ parseTick = do
   tsec <- getWord64le
   tusec <- getWord32le
   dt <- toEnum . fromEnum <$> getWord32le
-  intpart <- (fromIntegral <$> getWord64le) :: Get Int64
-  nanopart <- (fromIntegral <$> getWord32le) :: Get Int32
+  price <- parsePrice
   volume <- fromIntegral <$> (fromIntegral <$> getWord32le :: Get Int32)
   return Tick { security = "",
     datatype = dt,
     timestamp = makeTimestamp tsec tusec,
-    value = compose (intpart, nanopart `div` 1000),
+    value = price,
     volume = volume }
-  where
-    makeTimestamp :: Word64 -> Word32 -> UTCTime
-    makeTimestamp sec usec = addUTCTime (fromRational $ toInteger usec % 1000000) (fromSeconds . toInteger $ sec)
+
+makeTimestamp :: Word64 -> Word32 -> UTCTime
+makeTimestamp sec usec = addUTCTime (fromRational $ toInteger usec % 1000000) (fromSeconds . toInteger $ sec)
 
 deserializeTick :: [ByteString] -> Maybe Tick
 deserializeTick (header:rawData:_) = case runGetOrFail parseTick rawData of
@@ -146,23 +162,84 @@ deserializeTick _ = Nothing
 
 deserializeTickBody :: ByteString -> (ByteString, Maybe Tick)
 deserializeTickBody bs = case runGetOrFail parseTick bs of
-  Left (rest, _, _) -> (rest, Nothing)
+  Left (rest, _, _)     -> (rest, Nothing)
   Right (rest, _, tick) -> (rest, Just tick)
 
 data Bar = Bar {
-  barSecurity :: !TickerId,
+  barSecurity  :: !TickerId,
   barTimestamp :: !UTCTime,
-  barOpen :: !Price,
-  barHigh :: !Price,
-  barLow :: !Price,
-  barClose :: !Price,
-  barVolume :: !Integer
+  barOpen      :: !Price,
+  barHigh      :: !Price,
+  barLow       :: !Price,
+  barClose     :: !Price,
+  barVolume    :: !Integer
 } deriving (Show, Eq, Generic)
+
+-- | Stores timeframe in seconds
+newtype BarTimeframe = BarTimeframe { unBarTimeframe :: Int }
+  deriving (Show, Eq)
+
+serializeBar :: BarTimeframe -> Bar -> [ByteString]
+serializeBar tf bar = serializeBarHeader tf bar : [serializeBarBody tf bar]
+
+-- | Encodes bar header as tickerid:timeframe_seconds;
+-- Why ';' at the end? To support correct 0mq subscriptions. When we subscribe to topic,
+-- we actually subscribe by all topics which has requested subscription as a prefix.
+serializeBarHeader :: BarTimeframe -> Bar -> ByteString
+serializeBarHeader tf bar =
+  B.fromStrict . E.encodeUtf8 $ (barSecurity bar) `T.append` encodeTimeframe tf
+  where
+    encodeTimeframe tf = mconcat [ ":", (T.pack . show $ unBarTimeframe tf), ";" ]
+
+serializeBarBody :: BarTimeframe -> Bar -> ByteString
+serializeBarBody tf bar = runPut $ do
+  putWord32le 2
+  putWord32le $ fromIntegral $ unBarTimeframe tf
+  putWord64le $ fromIntegral . toSeconds' . barTimestamp $ bar
+  putWord32le $ fromIntegral . fracSeconds . barTimestamp $ bar
+  putPrice $ barOpen bar
+  putPrice $ barHigh bar
+  putPrice $ barLow bar
+  putPrice $ barClose bar
+  putWord32le $ fromIntegral $ barVolume bar
+  where
+    fractionalPart :: (RealFrac a) => a -> a
+    fractionalPart x = x - fromIntegral (truncate x)
+    toSeconds' = floor . utcTimeToPOSIXSeconds
+    fracSeconds t = (truncate $ (* 1000000000000) $ utcTimeToPOSIXSeconds t) `mod` 1000000000000 `div` 1000000
+
+parseBar :: Get (BarTimeframe, Bar)
+parseBar = do
+  packetType <- fromEnum <$> getWord32le
+  when (packetType /= 2) $ fail "Expected packettype == 2"
+  tf <- fromIntegral <$> getWord32le
+  tsec <- getWord64le
+  tusec <- getWord32le
+  open_ <- parsePrice
+  high_ <- parsePrice
+  low_ <- parsePrice
+  close_ <- parsePrice
+  volume_ <- fromIntegral <$> getWord32le
+  return (BarTimeframe tf, Bar { barSecurity = "",
+               barTimestamp = makeTimestamp tsec tusec,
+               barOpen = open_,
+               barHigh = high_,
+               barLow = low_,
+               barClose = close_,
+               barVolume = volume_ })
+
+deserializeBar :: [ByteString] -> Maybe (BarTimeframe, Bar)
+deserializeBar (header:rawData:_) = case runGetOrFail parseBar rawData of
+  Left (_, _, _) -> Nothing
+  Right (_, _, (tf, bar)) -> Just $ (tf, bar { barSecurity = T.takeWhile (/= ':') . E.decodeUtf8 . B.toStrict $ header })
+
+deserializeBar _ = Nothing
+
 
 data SignalId = SignalId {
   strategyId :: T.Text,
   signalName :: T.Text,
-  comment :: T.Text }
+  comment    :: T.Text }
   deriving (Show, Eq)
 
 instance FromJSON SignalId where
@@ -195,7 +272,7 @@ instance FromJSON OrderPrice where
         execPrice <- v .: "execution"
         case execPrice of
           (String s) -> if s /= "market"
-              then (fail "If string, then should be 'market'") 
+              then (fail "If string, then should be 'market'")
               else return $ StopMarket trprice
           (Number n) -> return $ Stop trprice (fromScientific n)
           _ -> fail "Should be either number or 'market'"
@@ -223,7 +300,7 @@ instance FromJSON Operation where
   parseJSON _ = fail "Should be string"
 
 instance ToJSON Operation where
-  toJSON Buy = String "buy"
+  toJSON Buy  = String "buy"
   toJSON Sell = String "sell"
 
 data OrderState = Unsubmitted
@@ -250,26 +327,26 @@ instance FromJSON OrderState where
 
 instance ToJSON OrderState where
   toJSON os = case os of
-    Unsubmitted -> String "unsubmitted"
-    Submitted -> String "submitted"
+    Unsubmitted       -> String "unsubmitted"
+    Submitted         -> String "submitted"
     PartiallyExecuted -> String "partially-executed"
-    Executed -> String "executed"
-    Cancelled -> String "cancelled"
-    Rejected -> String "rejected"
-    OrderError -> String "error"
+    Executed          -> String "executed"
+    Cancelled         -> String "cancelled"
+    Rejected          -> String "rejected"
+    OrderError        -> String "error"
 
 type OrderId = Integer
 
 data Order = Order {
-  orderId :: OrderId,
-  orderAccountId :: T.Text,
-  orderSecurity :: T.Text,
-  orderPrice :: OrderPrice,
-  orderQuantity :: Integer,
+  orderId               :: OrderId,
+  orderAccountId        :: T.Text,
+  orderSecurity         :: T.Text,
+  orderPrice            :: OrderPrice,
+  orderQuantity         :: Integer,
   orderExecutedQuantity :: Integer,
-  orderOperation :: Operation,
-  orderState :: OrderState,
-  orderSignalId :: SignalId }
+  orderOperation        :: Operation,
+  orderState            :: OrderState,
+  orderSignalId         :: SignalId }
   deriving (Show, Eq)
 
 mkOrder = Order { orderId = 0,
@@ -310,17 +387,17 @@ instance ToJSON Order where
       ifMaybe name pred val = if pred val then Just (name .= val) else Nothing
 
 data Trade = Trade {
-  tradeOrderId :: OrderId,
-  tradePrice :: Price,
-  tradeQuantity :: Integer,
-  tradeVolume :: Price,
+  tradeOrderId        :: OrderId,
+  tradePrice          :: Price,
+  tradeQuantity       :: Integer,
+  tradeVolume         :: Price,
   tradeVolumeCurrency :: T.Text,
-  tradeOperation :: Operation,
-  tradeAccount :: T.Text,
-  tradeSecurity :: T.Text,
-  tradeTimestamp :: UTCTime,
-  tradeCommission :: Price,
-  tradeSignalId :: SignalId }
+  tradeOperation      :: Operation,
+  tradeAccount        :: T.Text,
+  tradeSecurity       :: T.Text,
+  tradeTimestamp      :: UTCTime,
+  tradeCommission     :: Price,
+  tradeSignalId       :: SignalId }
   deriving (Show, Eq)
 
 instance FromJSON Trade where
@@ -352,7 +429,7 @@ instance ToJSON Trade where
     "signal-id" .= tradeSignalId trade]
 
 data ServerSecurityParams = ServerSecurityParams {
-  sspDomain :: Maybe T.Text,
+  sspDomain      :: Maybe T.Text,
   sspCertificate :: Maybe CurveCertificate
 } deriving (Show, Eq)
 
@@ -362,8 +439,8 @@ defaultServerSecurityParams = ServerSecurityParams {
 }
 
 data ClientSecurityParams = ClientSecurityParams {
-  cspDomain :: Maybe T.Text,
-  cspCertificate :: Maybe CurveCertificate,
+  cspDomain            :: Maybe T.Text,
+  cspCertificate       :: Maybe CurveCertificate,
   cspServerCertificate :: Maybe CurveCertificate
 } deriving (Show, Eq)
 
@@ -373,10 +450,10 @@ defaultClientSecurityParams = ClientSecurityParams {
 }
 
 data TickerInfo = TickerInfo {
-  tiTicker :: TickerId,
-  tiClass :: T.Text,
-  tiBase :: Maybe TickerId,
-  tiLotSize :: Integer,
+  tiTicker   :: TickerId,
+  tiClass    :: T.Text,
+  tiBase     :: Maybe TickerId,
+  tiLotSize  :: Integer,
   tiTickSize :: Price
 } deriving (Show, Eq)
 

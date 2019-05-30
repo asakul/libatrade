@@ -15,6 +15,8 @@ import ArbitraryInstances ()
 import Data.Aeson
 import qualified Data.ByteString.Lazy as B
 
+import Debug.Trace
+
 properties :: TestTree
 properties = testGroup "Types" [
     testTickSerialization
@@ -31,6 +33,7 @@ properties = testGroup "Types" [
   , testPriceAddition
   , testPriceMultiplication
   , testPriceSubtraction
+  , testBarSerialization
   ]
 
 testTickSerialization :: TestTree
@@ -116,3 +119,8 @@ testPriceSubtraction :: TestTree
 testPriceSubtraction = QC.testProperty "Price subtraction"
   (\(p1, p2) -> abs (toDouble p1 - toDouble p2 - toDouble (p1 - p2)) < 0.00001)
 
+testBarSerialization :: TestTree
+testBarSerialization = QC.testProperty "Deserialize serialized bar"
+  (\(tf, bar) -> case deserializeBar (serializeBar tf bar) of
+    Just (tf', bar') -> bar == bar' && tf == tf'
+    Nothing -> False)

@@ -1,47 +1,52 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module ATrade.QuoteSource.Client (
+  QuoteData(..),
   startQuoteSourceClient,
   stopQuoteSourceClient
 ) where
 
-import ATrade.Types
-import Control.Concurrent.BoundedChan
-import Control.Concurrent hiding (readChan, writeChan, writeList2Chan)
-import Control.Concurrent.MVar
-import Control.Monad
-import Control.Monad.Loops
-import Control.Exception
-import Data.List.NonEmpty
-import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Char8 as B8
-import qualified Data.List as L
-import Data.Text.Encoding
-import Data.Time.Clock
-import Data.IORef
-import System.ZMQ4
-import System.Log.Logger
+import           ATrade.Types
+import           Control.Concurrent             hiding (readChan, writeChan,
+                                                 writeList2Chan)
+import           Control.Concurrent.BoundedChan
+import           Control.Concurrent.MVar
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.Loops
+import qualified Data.ByteString.Char8          as B8
+import qualified Data.ByteString.Lazy           as BL
+import           Data.IORef
+import qualified Data.List                      as L
+import           Data.List.NonEmpty
+import           Data.Maybe
+import qualified Data.Text                      as T
+import           Data.Text.Encoding
+import           Data.Time.Clock
+import           System.Log.Logger
+import           System.ZMQ4
 
-import Safe
+import           Safe
 
 data QuoteSourceClientHandle = QuoteSourceClientHandle {
-  tid :: ThreadId,
+  tid            :: ThreadId,
   completionMvar :: MVar (),
-  killMVar :: MVar ()
+  killMVar       :: MVar ()
 }
 
-deserializeTicks :: [BL.ByteString] -> [Tick]
+data QuoteData = QDTick Tick | QDBar (BarTimeframe, Bar)
+  deriving (Show, Eq)
+
+deserializeTicks :: [BL.ByteString] -> [QuoteData]
 deserializeTicks (secname:raw:_) = deserializeWithName (decodeUtf8 . BL.toStrict $ secname) raw
   where
     deserializeWithName secNameT raw = case deserializeTickBody raw of
-      (rest, Just tick) -> tick { security = secNameT } : deserializeWithName secNameT rest
+      (rest, Just tick) -> QDTick (tick { security = secNameT }) : deserializeWithName secNameT rest
       _ -> []
 
 deserializeTicks _ = []
 
-startQuoteSourceClient :: BoundedChan Tick -> [T.Text] -> Context -> T.Text -> IO QuoteSourceClientHandle
+startQuoteSourceClient :: BoundedChan QuoteData -> [T.Text] -> Context -> T.Text -> IO QuoteSourceClientHandle
 startQuoteSourceClient chan tickers ctx endpoint = do
   compMv <- newEmptyMVar
   killMv <- newEmptyMVar
@@ -60,14 +65,16 @@ startQuoteSourceClient chan tickers ctx endpoint = do
       now <- getCurrentTime
       writeIORef lastHeartbeat now
       whileM_ (andM [notTimeout lastHeartbeat, isNothing <$> tryReadMVar killMv]) $ do
-        evs <- poll 200 [Sock sock [In] Nothing] 
+        evs <- poll 200 [Sock sock [In] Nothing]
         unless (null (L.head evs)) $ do
           rawTick <- fmap BL.fromStrict <$> receiveMulti sock
           now <- getCurrentTime
           prevHeartbeat <- readIORef lastHeartbeat
           if headMay rawTick == Just "SYSTEM#HEARTBEAT"
             then writeIORef lastHeartbeat now
-            else writeList2Chan chan (deserializeTicks rawTick)
+            else case deserializeBar rawTick of
+              Just (tf, bar) -> writeChan chan $ QDBar (tf, bar)
+              _ -> writeList2Chan chan (deserializeTicks rawTick)
       debugM "QuoteSource.Client" "Heartbeat timeout")
 
     notTimeout ts = do

@@ -10,6 +10,7 @@ import Test.QuickCheck.Instances ()
 
 import ATrade.Types
 import ATrade.Price as P
+import qualified Data.Text as T
 import ATrade.Broker.Protocol
 
 import Data.Time.Clock
@@ -18,22 +19,24 @@ import Data.Time.Calendar
 notTooBig :: (Num a, Ord a) => a -> Bool
 notTooBig x = abs x < 100000000
 
+arbitraryTickerId = arbitrary `suchThat` (T.all (/= ':'))
+
 instance Arbitrary Tick where
   arbitrary = Tick <$>
-    arbitrary <*>
+    arbitraryTickerId <*>
     arbitrary <*>
     arbitraryTimestamp <*>
     arbitrary <*>
     arbitrary
-    where
-      arbitraryTimestamp = do
-        y <- choose (1970, 2050)
-        m <- choose (1, 12)
-        d <- choose (1, 31)
 
-        sec <- secondsToDiffTime <$> choose (0, 86399)
+arbitraryTimestamp = do
+  y <- choose (1970, 2050)
+  m <- choose (1, 12)
+  d <- choose (1, 31)
 
-        return $ UTCTime (fromGregorian y m d) sec
+  sec <- secondsToDiffTime <$> choose (0, 86399)
+
+  return $ UTCTime (fromGregorian y m d) sec
 
 instance Arbitrary DataType where
   arbitrary = toEnum <$> choose (1, 10)
@@ -116,3 +119,17 @@ instance Arbitrary BrokerServerResponse where
 instance Arbitrary P.Price where
   arbitrary = P.Price <$> (arbitrary `suchThat` (\p -> abs p < 1000000000 * 10000000))
 
+instance Arbitrary Bar where
+  arbitrary = Bar <$>
+    arbitraryTickerId <*>
+    arbitraryTimestamp <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary <*>
+    arbitrary `suchThat` (> 0)
+
+instance Arbitrary BarTimeframe where
+  arbitrary = BarTimeframe <$> (arbitrary `suchThat` (\p -> p > 0 && p < 86400 * 365))
+
+    

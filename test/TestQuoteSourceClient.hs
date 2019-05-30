@@ -4,22 +4,22 @@ module TestQuoteSourceClient (
   unitTests
 ) where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import           Test.Tasty
+import           Test.Tasty.HUnit
 
-import ATrade.Types
-import ATrade.QuoteSource.Server
-import ATrade.QuoteSource.Client
-import Control.Monad
-import Control.Concurrent.BoundedChan
-import Control.Concurrent hiding (writeChan, readChan)
-import Control.Exception
-import System.ZMQ4
-import Data.Time.Clock
-import Data.Time.Calendar
-import qualified Data.Text as T
-import Data.UUID as U
-import Data.UUID.V4 as UV4
+import           ATrade.QuoteSource.Client
+import           ATrade.QuoteSource.Server
+import           ATrade.Types
+import           Control.Concurrent             hiding (readChan, writeChan)
+import           Control.Concurrent.BoundedChan
+import           Control.Exception
+import           Control.Monad
+import qualified Data.Text                      as T
+import           Data.Time.Calendar
+import           Data.Time.Clock
+import           Data.UUID                      as U
+import           Data.UUID.V4                   as UV4
+import           System.ZMQ4
 
 makeEndpoint :: IO T.Text
 makeEndpoint = do
@@ -27,7 +27,10 @@ makeEndpoint = do
   return $ "inproc://server" `T.append` uid
 
 unitTests :: TestTree
-unitTests = testGroup "QuoteSource.Client" [testStartStop, testTickStream]
+unitTests = testGroup "QuoteSource.Client" [
+    testStartStop
+  , testTickStream
+  , testBarStream ]
 
 testStartStop :: TestTree
 testStartStop = testCase "QuoteSource client connects and disconnects" $ withContext (\ctx -> do
@@ -51,6 +54,24 @@ testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\c
           value = 1000,
           volume = 1}
       forkIO $ forever $ writeChan chan (QSSTick tick)
-      recvdTick <- readChan clientChan
-      tick @=? recvdTick)))
-  
+      recvdData <- readChan clientChan
+      QDTick tick @=? recvdData)))
+
+testBarStream :: TestTree
+testBarStream = testCase "QuoteSource clients receives bars" $ withContext (\ctx -> do
+  ep <- makeEndpoint
+  chan <- newBoundedChan 1000
+  clientChan <- newBoundedChan 1000
+  bracket (startQuoteSourceServer chan ctx ep Nothing) stopQuoteSourceServer (\_ ->
+    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep) stopQuoteSourceClient (\_ -> do
+      let bar = Bar {
+          barSecurity = "FOOBAR",
+          barTimestamp = UTCTime (fromGregorian 2016 9 27) 16000,
+          barOpen = fromDouble 10.0,
+          barHigh = fromDouble 15.0,
+          barLow = fromDouble 8.0,
+          barClose = fromDouble 11.0,
+          barVolume = 42 }
+      forkIO $ forever $ writeChan chan $ QSSBar (BarTimeframe 60, bar)
+      recvdData <- readChan clientChan
+      QDBar (BarTimeframe 60, bar) @=? recvdData)))
