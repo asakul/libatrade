@@ -231,10 +231,12 @@ parseBar = do
 deserializeBar :: [ByteString] -> Maybe (BarTimeframe, Bar)
 deserializeBar (header:rawData:_) = case runGetOrFail parseBar rawData of
   Left (_, _, _) -> Nothing
-  Right (_, _, (tf, bar)) -> Just $ (tf, bar { barSecurity = T.takeWhile (/= ':') . E.decodeUtf8 . B.toStrict $ header })
+  Right (_, _, (tf, bar)) ->
+    case E.decodeUtf8' . B.toStrict $ header of
+      Right fullHeader -> Just $ (tf, bar { barSecurity = T.takeWhile (/= ':') fullHeader })
+      Left err -> Nothing
 
 deserializeBar _ = Nothing
-
 
 data SignalId = SignalId {
   strategyId :: T.Text,
