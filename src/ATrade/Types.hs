@@ -441,7 +441,6 @@ defaultServerSecurityParams = ServerSecurityParams {
 }
 
 data ClientSecurityParams = ClientSecurityParams {
-  cspDomain            :: Maybe T.Text,
   cspCertificate       :: Maybe CurveCertificate,
   cspServerCertificate :: Maybe CurveCertificate
 } deriving (Show, Eq)
