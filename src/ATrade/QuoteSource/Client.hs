@@ -25,6 +25,7 @@ import           Data.Text.Encoding
 import           Data.Time.Clock
 import           System.Log.Logger
 import           System.ZMQ4
+import           System.ZMQ4.ZAP
 
 import           Safe
 
@@ -46,8 +47,8 @@ deserializeTicks (secname:raw:_) = deserializeWithName (decodeUtf8 . BL.toStrict
 
 deserializeTicks _ = []
 
-startQuoteSourceClient :: BoundedChan QuoteData -> [T.Text] -> Context -> T.Text -> IO QuoteSourceClientHandle
-startQuoteSourceClient chan tickers ctx endpoint = do
+startQuoteSourceClient :: BoundedChan QuoteData -> [T.Text] -> Context -> T.Text -> ClientSecurityParams -> IO QuoteSourceClientHandle
+startQuoteSourceClient chan tickers ctx endpoint csp = do
   compMv <- newEmptyMVar
   killMv <- newEmptyMVar
   now <- getCurrentTime
@@ -57,6 +58,12 @@ startQuoteSourceClient chan tickers ctx endpoint = do
   where
     clientThread lastHeartbeat killMv = whileM_ (isNothing <$> tryReadMVar killMv) $ withSocket ctx Sub (\sock -> do
       setLinger (restrict 0) sock
+      debugM "QuoteSource.Client" $ "Client security parameters: " ++ show csp
+      case (cspCertificate csp, cspServerCertificate csp) of
+        (Just cert, Just serverCert) -> do
+          zapApplyCertificate cert sock
+          zapSetServerCertificate serverCert sock
+        _                            -> return ()
       connect sock $ T.unpack endpoint
       debugM "QuoteSource.Client" $ "Tickers: " ++ show tickers
       mapM_ (subscribe sock . encodeUtf8) tickers

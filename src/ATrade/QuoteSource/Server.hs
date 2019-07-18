@@ -89,12 +89,17 @@ serverThread state = do
         header = BL.fromStrict . E.encodeUtf8 $ secName
         body = BL.concat $ map serializeTickBody ticklist
 
-startQuoteSourceServer :: BoundedChan QuoteSourceServerData -> Context -> T.Text -> Maybe DomainId -> IO QuoteSourceServer
-startQuoteSourceServer chan c ep socketDomainIdMb = do
+startQuoteSourceServer :: BoundedChan QuoteSourceServerData -> Context -> T.Text -> ServerSecurityParams -> IO QuoteSourceServer
+startQuoteSourceServer chan c ep ssp = do
   sock <- socket c Pub
   setLinger (restrict 0) sock
-  case socketDomainIdMb of
+  case sspDomain ssp of
     Just socketDomainId -> setZapDomain (restrict $ E.encodeUtf8 socketDomainId) sock
+    _ -> return ()
+  case sspCertificate ssp of
+    Just cert -> do
+      setCurveServer True sock
+      zapApplyCertificate cert sock
     _ -> return ()
   bind sock $ T.unpack ep
   tid <- myThreadId
