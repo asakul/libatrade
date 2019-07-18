@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE MultiWayIf        #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module ATrade.Price (
@@ -11,13 +11,13 @@ module ATrade.Price (
   toScientific
 ) where
 
-import Data.Int
-import Data.Ratio
+import           Data.Int
+import           Data.Ratio
 
-import Data.Aeson
-import Data.Scientific
+import           Data.Aeson
+import           Data.Scientific
 
-import Text.Printf
+import           Text.Printf
 
 data Price = Price {
   priceQuants :: !Int64
@@ -37,7 +37,7 @@ instance Num Price where
 
   signum a = a { priceQuants = signum (priceQuants a)}
 
-  fromInteger int = Price { priceQuants = mega * fromInteger int} 
+  fromInteger int = Price { priceQuants = mega * fromInteger int}
 
   negate a = a { priceQuants = negate (priceQuants a) }
 
@@ -45,7 +45,7 @@ toDouble :: Price -> Double
 toDouble p = fromIntegral (priceQuants p) / fromIntegral mega
 
 fromDouble :: Double -> Price
-fromDouble d = Price { priceQuants = truncate (d * fromIntegral mega) }
+fromDouble d = Price { priceQuants = truncate ((d * fromIntegral mega) + 0.5) }
 
 toScientific :: Price -> Scientific
 toScientific p = normalize $ scientific (toInteger $ priceQuants p) (-6)
