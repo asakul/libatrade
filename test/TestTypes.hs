@@ -1,21 +1,23 @@
-{-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
-{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE MultiWayIf           #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module TestTypes (
   properties
 ) where
 
-import Test.Tasty
-import Test.Tasty.QuickCheck as QC
+import           Test.Tasty
+import           Test.Tasty.QuickCheck as QC
 
-import ATrade.Types
-import ATrade.Price as P
+import           ATrade.Price          as P
+import           ATrade.Types
 
-import ArbitraryInstances ()
-import Data.Aeson
-import qualified Data.ByteString.Lazy as B
+import           ArbitraryInstances    ()
+import           Data.Aeson
+import qualified Data.ByteString.Lazy  as B
 
-import Debug.Trace
+import           Debug.Trace
 
 properties :: TestTree
 properties = testGroup "Types" [
@@ -39,18 +41,18 @@ properties = testGroup "Types" [
 testTickSerialization :: TestTree
 testTickSerialization = QC.testProperty "Deserialize serialized tick"
   (\tick -> case (deserializeTick . serializeTick) tick of
-    Just t -> tick == t
+    Just t  -> tick == t
     Nothing -> False)
 
 -- Adjust arbitrary instances of ticks, because body doesn't store security name
 testTickBodySerialization :: TestTree
 testTickBodySerialization = QC.testProperty "Deserialize serialized bunch of tick" $
-  QC.forAll (arbitrary >>= (\t -> return t { security = "" })) (\tick1 -> 
+  QC.forAll (arbitrary >>= (\t -> return t { security = "" })) (\tick1 ->
     QC.forAll (arbitrary >>= (\t -> return t { security = "" })) (\tick2 ->
       case deserializeTickBody (serialized tick1 tick2) of
         (rest, Just t1) -> case deserializeTickBody rest of
           (_, Just t2) -> tick1 == t1 && tick2 == t2
-          _ -> False
+          _            -> False
         _ -> False))
   where
     serialized t1 t2 = serializeTickBody t1 `B.append` serializeTickBody t2
@@ -58,43 +60,43 @@ testTickBodySerialization = QC.testProperty "Deserialize serialized bunch of tic
 testSignalIdSerialization :: TestTree
 testSignalIdSerialization = QC.testProperty "Deserialize serialized SignalId"
   (\sid -> case (decode . encode $ sid :: Maybe SignalId) of
-    Just s -> s == sid
+    Just s  -> s == sid
     Nothing -> False)
 
 testOrderPriceSerialization :: TestTree
 testOrderPriceSerialization = QC.testProperty "Deserialize serialized OrderPrice"
   (\v -> case (decode . encode $ v :: Maybe OrderPrice) of
-    Just s -> s == v
+    Just s  -> s == v
     Nothing -> False)
 
 testOperationSerialization :: TestTree
 testOperationSerialization = QC.testProperty "Deserialize serialized Operation"
   (\v -> case (decode . encode $ v :: Maybe Operation) of
-    Just s -> s == v
+    Just s  -> s == v
     Nothing -> False)
 
 testOrderStateSerialization :: TestTree
 testOrderStateSerialization = QC.testProperty "Deserialize serialized OrderState"
   (\v -> case (decode . encode $ v :: Maybe OrderState) of
-    Just s -> s == v
+    Just s  -> s == v
     Nothing -> False)
 
 testOrderSerialization :: TestTree
 testOrderSerialization = QC.testProperty "Deserialize serialized Order"
   (\v -> case (decode . encode $ v :: Maybe Order) of
-    Just s -> s == v
+    Just s  -> s == v
     Nothing -> False)
 
 testTradeSerialization :: TestTree
 testTradeSerialization = QC.testProperty "Deserialize serialized Trade"
   (\v -> case (decode . encode $ v :: Maybe Trade) of
-    Just s -> s == v
+    Just s  -> s == v
     Nothing -> False)
 
 testPrice1 :: TestTree
-testPrice1 = QC.testProperty "fromDouble . toDouble $ Price"
-  (\p -> let newp = (P.fromDouble . P.toDouble) p in
-    (abs (priceQuants newp - priceQuants p) < 1000))
+testPrice1 = QC.testProperty "fromDouble . toDouble $ Price" $
+  QC.forAll (arbitrary `suchThat` (\x -> abs x < 100000000)) (\p -> let newp = (P.fromDouble . P.toDouble) p in
+    (priceQuants newp == priceQuants p))
 
 testPrice2 :: TestTree
 testPrice2 = QC.testProperty "toDouble . fromDouble $ Price" $
@@ -123,4 +125,4 @@ testBarSerialization :: TestTree
 testBarSerialization = QC.testProperty "Deserialize serialized bar"
   (\(tf, bar) -> case deserializeBar (serializeBar tf bar) of
     Just (tf', bar') -> bar == bar' && tf == tf'
-    Nothing -> False)
+    Nothing          -> False)

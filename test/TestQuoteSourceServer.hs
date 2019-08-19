@@ -15,6 +15,7 @@ import qualified Data.ByteString.Lazy           as BL
 import           Data.Time.Calendar
 import           Data.Time.Clock
 import           System.ZMQ4
+import           System.ZMQ4.ZAP
 
 unitTests :: TestTree
 unitTests = testGroup "QuoteSource.Server" [
@@ -25,13 +26,13 @@ unitTests = testGroup "QuoteSource.Server" [
 testStartStop :: TestTree
 testStartStop = testCase "QuoteSource Server starts and stops" $ withContext (\ctx -> do
   chan <- newBoundedChan 1000
-  qss <- startQuoteSourceServer chan ctx "inproc://quotesource-server" Nothing
+  qss <- startQuoteSourceServer chan ctx "inproc://quotesource-server" defaultServerSecurityParams
   stopQuoteSourceServer qss)
 
 testTickStream :: TestTree
 testTickStream = testCase "QuoteSource Server sends ticks" $ withContext (\ctx -> do
   chan <- newBoundedChan 1000
-  bracket (startQuoteSourceServer chan ctx "inproc://quotesource-server" Nothing) stopQuoteSourceServer (\_ ->
+  bracket (startQuoteSourceServer chan ctx "inproc://quotesource-server" defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
     withSocket ctx Sub (\s -> do
       connect s "inproc://quotesource-server"
       subscribe s "FOOBAR"
@@ -51,7 +52,7 @@ testTickStream = testCase "QuoteSource Server sends ticks" $ withContext (\ctx -
 testBarStream :: TestTree
 testBarStream = testCase "QuoteSource Server sends bars" $ withContext (\ctx -> do
   chan <- newBoundedChan 1000
-  bracket (startQuoteSourceServer chan ctx "inproc://quotesource-server" Nothing) stopQuoteSourceServer (\_ ->
+  bracket (startQuoteSourceServer chan ctx "inproc://quotesource-server" defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
     withSocket ctx Sub (\s -> do
       connect s "inproc://quotesource-server"
       subscribe s "FOOBAR"

@@ -45,7 +45,9 @@ toDouble :: Price -> Double
 toDouble p = fromIntegral (priceQuants p) / fromIntegral mega
 
 fromDouble :: Double -> Price
-fromDouble d = Price { priceQuants = truncate ((d * fromIntegral mega) + 0.5) }
+fromDouble d
+  | d >= 0 = Price { priceQuants = truncate ((d * fromIntegral mega) + 0.5) }
+  | otherwise = Price { priceQuants = truncate ((d * fromIntegral mega) - 0.5) }
 
 toScientific :: Price -> Scientific
 toScientific p = normalize $ scientific (toInteger $ priceQuants p) (-6)

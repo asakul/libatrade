@@ -20,6 +20,7 @@ import           Data.Time.Clock
 import           Data.UUID                      as U
 import           Data.UUID.V4                   as UV4
 import           System.ZMQ4
+import           System.ZMQ4.ZAP
 
 makeEndpoint :: IO T.Text
 makeEndpoint = do
@@ -37,16 +38,16 @@ testStartStop = testCase "QuoteSource client connects and disconnects" $ withCon
   ep <- makeEndpoint
   chan <- newBoundedChan 1000
   clientChan <- newBoundedChan 1000
-  bracket (startQuoteSourceServer chan ctx ep Nothing) stopQuoteSourceServer (\_ ->
-    bracket (startQuoteSourceClient clientChan [] ctx ep) stopQuoteSourceClient (const yield)))
+  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
+    bracket (startQuoteSourceClient clientChan [] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (const yield)))
 
 testTickStream :: TestTree
 testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\ctx -> do
   ep <- makeEndpoint
   chan <- newBoundedChan 1000
   clientChan <- newBoundedChan 1000
-  bracket (startQuoteSourceServer chan ctx ep Nothing) stopQuoteSourceServer (\_ ->
-    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep) stopQuoteSourceClient (\_ -> do
+  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
+    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\_ -> do
       let tick = Tick {
           security = "FOOBAR",
           datatype = LastTradePrice,
@@ -62,8 +63,8 @@ testBarStream = testCase "QuoteSource clients receives bars" $ withContext (\ctx
   ep <- makeEndpoint
   chan <- newBoundedChan 1000
   clientChan <- newBoundedChan 1000
-  bracket (startQuoteSourceServer chan ctx ep Nothing) stopQuoteSourceServer (\_ ->
-    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep) stopQuoteSourceClient (\_ -> do
+  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
+    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\_ -> do
       let bar = Bar {
           barSecurity = "FOOBAR",
           barTimestamp = UTCTime (fromGregorian 2016 9 27) 16000,
