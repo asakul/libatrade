@@ -26,6 +26,8 @@ library
                      , ATrade.Broker.TradeSinks.TelegramTradeSink
                      , ATrade.Broker.TradeSinks.ZMQTradeSink
                      , ATrade.Util
+                     , ATrade
+  other-modules:       Paths_libatrade
   build-depends:       base >= 4.7 && < 5
                      , time
                      , datetime
@@ -52,16 +54,9 @@ library
                      , http-client-tls
                      , utf8-string
                      , scientific
+                     , gitrev
   default-language:    Haskell2010
 
-executable libatrade-exe
-  hs-source-dirs:      app
-  main-is:             Main.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wincomplete-patterns
-  build-depends:       base
-                     , libatrade
-                     , pretty-hex
-  default-language:    Haskell2010
 
 test-suite libatrade-test
   type:                exitcode-stdio-1.0
