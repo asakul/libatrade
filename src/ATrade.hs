@@ -2,7 +2,8 @@
 
 module ATrade
 (
-  libatrade_version
+    libatrade_version
+  , libatrade_gitrev
 ) where
 import           Data.Version
 import           Paths_libatrade
