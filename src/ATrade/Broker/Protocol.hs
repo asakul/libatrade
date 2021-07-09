@@ -1,4 +1,7 @@
-{-# LANGUAGE OverloadedStrings, MultiWayIf, RecordWildCards #-}
+{-# LANGUAGE MultiWayIf        #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes       #-}
+{-# LANGUAGE RecordWildCards   #-}
 
 module ATrade.Broker.Protocol (
   BrokerServerRequest(..),
@@ -12,18 +15,18 @@ module ATrade.Broker.Protocol (
   ClientIdentity(..)
 ) where
 
-import Control.Error.Util
-import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as T
-import Data.Text.Format
-import Data.Text.Encoding
-import Data.Aeson
-import Data.Aeson.Types hiding (parse)
-import Data.Int
-import Data.Time.Clock
-import Data.Time.Calendar
-import ATrade.Types
-import Text.Parsec
+import           ATrade.Types
+import           Control.Error.Util
+import           Data.Aeson
+import           Data.Aeson.Types        hiding (parse)
+import qualified Data.HashMap.Strict     as HM
+import           Data.Int
+import qualified Data.Text               as T
+import           Data.Text.Encoding
+import           Data.Time.Calendar
+import           Data.Time.Clock
+import           Language.Haskell.Printf
+import           Text.Parsec
 
 type ClientIdentity = T.Text
 type RequestSqnum = Int64
@@ -103,7 +106,7 @@ notificationOrderId (TradeNotification trade) = tradeOrderId trade
 instance FromJSON Notification where
   parseJSON n = withObject "notification" (\obj ->
     case HM.lookup "trade" obj of
-      Just v -> parseTrade v
+      Just v  -> parseTrade v
       Nothing -> parseOrder n) n
     where
       parseTrade v = TradeNotification <$> parseJSON v
@@ -120,16 +123,16 @@ instance ToJSON Notification where
   toJSON (TradeNotification trade) = object ["trade" .= toJSON trade]
 
 data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {
-  tsAccountId :: T.Text,
-  tsSecurity :: T.Text,
-  tsPrice :: Double,
-  tsQuantity :: Int,
-  tsVolume :: Double,
-  tsCurrency :: T.Text,
-  tsOperation :: Operation,
+  tsAccountId     :: T.Text,
+  tsSecurity      :: T.Text,
+  tsPrice         :: Double,
+  tsQuantity      :: Int,
+  tsVolume        :: Double,
+  tsCurrency      :: T.Text,
+  tsOperation     :: Operation,
   tsExecutionTime :: UTCTime,
-  tsCommission :: Double,
-  tsSignalId :: SignalId
+  tsCommission    :: Double,
+  tsSignalId      :: SignalId
 } deriving (Show, Eq)
 
 mkTradeMessage trade = TradeSinkTrade {
@@ -153,10 +156,10 @@ getHMS (UTCTime _ diff) = (intsec `div` 3600, (intsec `mod` 3600) `div` 60, ints
     intsec = floor diff
     msec = floor $ (diff - fromIntegral intsec) * 1000
 
-formatTimestamp dt = format "{}-{}-{} {}:{}:{}.{}" (left 4 '0' y, left 2 '0' m, left 2 '0' d, left 2 '0' hour, left 2 '0' min, left 2 '0' sec, left 3 '0' msec)
+formatTimestamp dt = [t|%04d-%02d-%02d %02d:%02d:%02d.%03d|] y m d hour min sec msec
   where
     (y, m, d) = toGregorian $ utctDay dt
-    (hour, min, sec, msec) = getHMS dt 
+    (hour, min, sec, msec) = getHMS dt
 
 parseTimestamp (String t) = case hush $ parse p "" t of
   Just ts -> return ts
@@ -199,7 +202,7 @@ instance ToJSON TradeSinkMessage where
 instance FromJSON TradeSinkMessage where
   parseJSON = withObject "object" (\obj ->
     case HM.lookup "command" obj of
-      Nothing -> parseTrade obj
+      Nothing  -> parseTrade obj
       Just cmd -> return TradeSinkHeartBeat)
     where
       parseTrade obj = case HM.lookup "trade" obj of

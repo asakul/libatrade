@@ -1,34 +1,35 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes       #-}
 
 module ATrade.Broker.TradeSinks.TelegramTradeSink (
   withTelegramTradeSink
 ) where
 
-import Control.Exception
-import Control.Concurrent
+import           Control.Concurrent
 import qualified Control.Concurrent.BoundedChan as BC
-import Data.Aeson
-import Data.Aeson.Types
-import Data.IORef
-import Data.Maybe
-import Data.List.NonEmpty
-import qualified Data.List as L
-import qualified Data.ByteString as B hiding (putStrLn)
-import qualified Data.ByteString.Lazy as BL hiding (putStrLn)
-import System.Log.Logger
-import Control.Monad.Loops
-import Control.Monad.Extra
+import           Control.Exception
+import           Control.Monad.Extra
+import           Control.Monad.Loops
+import           Data.Aeson
+import           Data.Aeson.Types
+import qualified Data.ByteString                as B hiding (putStrLn)
+import qualified Data.ByteString.Lazy           as BL hiding (putStrLn)
+import           Data.IORef
+import qualified Data.List                      as L
+import           Data.List.NonEmpty
+import           Data.Maybe
+import           System.Log.Logger
 
-import ATrade.Types
-import ATrade.Broker.Protocol
-import Network.Connection
-import Network.HTTP.Client
-import Network.HTTP.Client.TLS
+import           ATrade.Broker.Protocol
+import           ATrade.Types
+import           Network.Connection
+import           Network.HTTP.Client
+import           Network.HTTP.Client.TLS
 
-import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
-import Data.Text.Format
-import qualified Data.ByteString.UTF8 as BU8
+import qualified Data.ByteString.UTF8           as BU8
+import qualified Data.Text                      as T
+import qualified Data.Text.Lazy                 as TL
+import           Language.Haskell.Printf
 
 withTelegramTradeSink apitoken chatId f = do
   killMv <- newEmptyMVar
@@ -42,14 +43,14 @@ sinkThread apitoken chatId killMv chan = do
   whileM_ (not <$> wasKilled) $ do
     maybeTrade <- BC.tryReadChan chan
     case maybeTrade of
-      Just trade -> sendMessage man apitoken chatId $ format "Trade: {} {} of {} at {} for {} ({}/{})"
-        (show (tradeOperation trade),
-          show (tradeQuantity trade),
-          tradeSecurity trade,
-          show (tradePrice trade),
-          tradeAccount trade,
-          (strategyId . tradeSignalId) trade,
-          (signalName . tradeSignalId) trade)
+      Just trade -> sendMessage man apitoken chatId $ [t|Trade: %? %? of %? at %? for %? (%?/%?)|]
+        (show $ tradeOperation trade)
+        (tradeQuantity trade)
+        (tradeSecurity trade)
+        (show $ tradePrice trade)
+        (tradeAccount trade)
+        ((strategyId . tradeSignalId) trade)
+        ((signalName . tradeSignalId) trade)
       Nothing -> threadDelay 1000000
   where
     tlsSettings = TLSSettingsSimple { settingDisableCertificateValidation = True, settingDisableSession = False, settingUseServerName = False }
@@ -75,4 +76,4 @@ sinkThread apitoken chatId killMv chan = do
 
 
 stopSinkThread killMv threadId = putMVar killMv () >> killThread threadId
-  
+
