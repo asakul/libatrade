@@ -29,6 +29,7 @@ import           System.ZMQ4
 unitTests :: TestTree
 unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerSubmitOrder
+  , testBrokerServerSubmitOrderDifferentIdentities
   , testBrokerServerSubmitOrderToUnknownAccount
   , testBrokerServerCancelOrder
   , testBrokerServerCancelUnknownOrder
@@ -52,6 +53,15 @@ connectAndSendOrder step sock order ep = do
 
   step "Sending request"
   send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 "identity" order)
+  threadDelay 10000
+
+connectAndSendOrderWithIdentity :: (Sender a) => (String -> IO ()) -> Socket a -> Order -> ClientIdentity -> T.Text -> IO ()
+connectAndSendOrderWithIdentity step sock order clientIdentity ep = do
+  step "Connecting"
+  connect sock (T.unpack ep)
+
+  step $ "Sending request for identity: " ++ show clientIdentity
+  send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 clientIdentity order)
   threadDelay 10000
 
 defaultOrder :: Order
@@ -101,6 +111,37 @@ testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \ste
         Just (ResponseOrderSubmitted _) -> return ()
         Just _                          -> assertFailure "Invalid response"
         Nothing                         -> assertFailure "Invalid response"
+
+testBrokerServerSubmitOrderDifferentIdentities :: TestTree
+testBrokerServerSubmitOrderDifferentIdentities = testCaseSteps "Broker Server submits order: different identities" $ \step -> withContext $ \ctx -> do
+  step "Setup"
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+  ep <- makeEndpoint
+  let orderId1 = 42
+  let orderId2 = 76
+  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+    withSocket ctx Req $ \sock1 -> do
+      withSocket ctx Req $ \sock2 -> do
+        connectAndSendOrderWithIdentity step sock1 defaultOrder {orderId = orderId1} "identity1" ep
+        connectAndSendOrderWithIdentity step sock2 defaultOrder {orderId = orderId2} "identity2" ep
+
+        step "Checking that orders are submitted to BrokerInterface"
+        s <- readIORef broState
+        (length . orders) s @?= 2
+
+        step "Reading response for identity1"
+        resp <- decode . BL.fromStrict <$> receive sock1
+        case resp of
+          Just (ResponseOrderSubmitted localOrderId) -> localOrderId @=? orderId1
+          Just _                          -> assertFailure "Invalid response"
+          Nothing                         -> assertFailure "Invalid response"
+
+        step "Reading response for identity2"
+        resp <- decode . BL.fromStrict <$> receive sock2
+        case resp of
+          Just (ResponseOrderSubmitted localOrderId) -> localOrderId @=? orderId2
+          Just _                          -> assertFailure "Invalid response"
+          Nothing                         -> assertFailure "Invalid response"
 
 testBrokerServerSubmitOrderToUnknownAccount :: TestTree
 testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server returns error if account is unknown" $
