@@ -9,6 +9,7 @@ module ATrade.Broker.Protocol (
   Notification(..),
   NotificationSqnum(..),
   nextSqnum,
+  getNotificationSqnum,
   notificationOrderId,
   RequestSqnum(..),
   requestSqnum,
@@ -35,7 +36,7 @@ type ClientIdentity = T.Text
 type RequestSqnum = Int64
 
 newtype NotificationSqnum = NotificationSqnum { unNotificationSqnum :: Int64 }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 nextSqnum :: NotificationSqnum -> NotificationSqnum
 nextSqnum (NotificationSqnum n) = NotificationSqnum (n + 1)
@@ -43,9 +44,9 @@ nextSqnum (NotificationSqnum n) = NotificationSqnum (n + 1)
 data Notification = OrderNotification NotificationSqnum OrderId OrderState | TradeNotification NotificationSqnum Trade
   deriving (Eq, Show)
 
-notificationSqnum :: Notification -> NotificationSqnum
-notificationSqnum (OrderNotification sqnum _ _) = sqnum
-notificationSqnum (TradeNotification sqnum _)   = sqnum
+getNotificationSqnum :: Notification -> NotificationSqnum
+getNotificationSqnum (OrderNotification sqnum _ _) = sqnum
+getNotificationSqnum (TradeNotification sqnum _)   = sqnum
 
 notificationOrderId :: Notification -> OrderId
 notificationOrderId (OrderNotification _ oid _) = oid
@@ -78,13 +79,13 @@ instance ToJSON Notification where
 
 data BrokerServerRequest = RequestSubmitOrder RequestSqnum ClientIdentity Order
   | RequestCancelOrder RequestSqnum ClientIdentity OrderId
-  | RequestNotifications RequestSqnum ClientIdentity
+  | RequestNotifications RequestSqnum ClientIdentity NotificationSqnum
   deriving (Eq, Show)
 
 requestSqnum :: BrokerServerRequest -> RequestSqnum
-requestSqnum (RequestSubmitOrder sqnum _ _) = sqnum
-requestSqnum (RequestCancelOrder sqnum _ _) = sqnum
-requestSqnum (RequestNotifications sqnum _) = sqnum
+requestSqnum (RequestSubmitOrder sqnum _ _)   = sqnum
+requestSqnum (RequestCancelOrder sqnum _ _)   = sqnum
+requestSqnum (RequestNotifications sqnum _ _) = sqnum
 
 instance FromJSON BrokerServerRequest where
   parseJSON = withObject "object" (\obj -> do
@@ -100,7 +101,9 @@ instance FromJSON BrokerServerRequest where
         | HM.member "cancel-order" obj = do
           orderId <- obj .: "cancel-order"
           RequestCancelOrder sqnum clientIdentity <$> parseJSON orderId
-        | HM.member "request-notifications" obj = return (RequestNotifications sqnum clientIdentity)
+        | HM.member "request-notifications" obj = do
+            initialSqnum <- obj .: "initial-sqnum"
+            return (RequestNotifications sqnum clientIdentity (NotificationSqnum initialSqnum))
       parseRequest _ _ _ = fail "Invalid request object"
 
 instance ToJSON BrokerServerRequest where
@@ -110,9 +113,10 @@ instance ToJSON BrokerServerRequest where
   toJSON (RequestCancelOrder sqnum clientIdentity oid) = object ["request-sqnum" .= sqnum,
     "client-identity" .= clientIdentity,
     "cancel-order" .= oid ]
-  toJSON (RequestNotifications sqnum clientIdentity) = object ["request-sqnum" .= sqnum,
+  toJSON (RequestNotifications sqnum clientIdentity initialNotificationSqnum) = object ["request-sqnum" .= sqnum,
     "client-identity" .= clientIdentity,
-    "request-notifications" .= ("" :: T.Text) ]
+    "request-notifications" .= ("" :: T.Text),
+    "initial-sqnum" .= unNotificationSqnum initialNotificationSqnum]
 
 data BrokerServerResponse = ResponseOrderSubmitted OrderId
   | ResponseOrderCancelled OrderId

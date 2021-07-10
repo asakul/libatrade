@@ -203,12 +203,13 @@ brokerServerThread state = finally brokerServerThread' cleanup
               cancelOrder bro globalOrderId
               return $ ResponseOrderCancelled localOrderId
             _ -> return $ ResponseError "Unknown order"
-        RequestNotifications sqnum clientIdentity -> do
+        RequestNotifications sqnum clientIdentity initialSqnum -> do
           maybeNs <- M.lookup clientIdentity . pendingNotifications <$> readIORef state
           case maybeNs of
             Just ns -> do
-              atomicMapIORef state (\s -> s { pendingNotifications = M.insert clientIdentity [] (pendingNotifications s)})
-              return $ ResponseNotifications . L.reverse $ ns
+              let filtered = L.filter (\n -> getNotificationSqnum n >= initialSqnum) ns
+              atomicMapIORef state (\s -> s { pendingNotifications = M.insert clientIdentity filtered (pendingNotifications s)})
+              return $ ResponseNotifications . L.reverse $ filtered
             Nothing -> return $ ResponseNotifications []
 
     sendMessage sock peerId resp = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])

@@ -112,7 +112,7 @@ instance Arbitrary BrokerServerRequest where
     t <- choose (1, 3) :: Gen Int
     if | t == 1 -> RequestSubmitOrder <$> arbitrary <*> arbitrary <*> arbitrary
        | t == 2 -> RequestCancelOrder <$> arbitrary <*> arbitrary <*> arbitrary
-       | t == 3 -> RequestNotifications <$> arbitrary <*> arbitrary
+       | t == 3 -> RequestNotifications <$> arbitrary <*> arbitrary <*> arbitrary
 
 instance Arbitrary BrokerServerResponse where
   arbitrary = do

@@ -18,6 +18,7 @@ import           Data.Aeson
 import qualified Data.ByteString        as B
 import qualified Data.ByteString.Lazy   as BL
 import           Data.IORef
+import           Data.List              (sort)
 import qualified Data.Text              as T
 import           Data.Time.Calendar
 import           Data.Time.Clock
@@ -35,6 +36,8 @@ unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerCancelUnknownOrder
   , testBrokerServerCorruptedPacket
   , testBrokerServerGetNotifications
+  , testBrokerServerGetNotificationsFromSameSqnum
+  , testBrokerServerGetNotificationsRemovesEarlierNotifications
   , testBrokerServerDuplicateRequest ]
 
 --
@@ -271,7 +274,7 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
         cb (BackendTradeNotification trade)
 
         step "Sending notifications request"
-        send sock [] (BL.toStrict . encode $ RequestNotifications 2 "identity")
+        send sock [] (BL.toStrict . encode $ RequestNotifications 2 "identity" (NotificationSqnum 1))
         threadDelay 10000
 
         -- We should obtain 3 notifications:
@@ -288,21 +291,128 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
             localOrderId @=? oid
             Executed @=? newstate
             trade { tradeOrderId = localOrderId } @=? newtrade
+            -- Check notification sqnums
+            step "Received notification sqnums are correct"
+            let sqnums = sort $ fmap (unNotificationSqnum . getNotificationSqnum) ns
+            sqnums @=? [1, 2, 3]
+
 
           Just _ -> assertFailure "Invalid response"
           Nothing -> assertFailure "Invalid response"
 
+testBrokerServerGetNotificationsFromSameSqnum :: TestTree
+testBrokerServerGetNotificationsFromSameSqnum = testCaseSteps "Broker Server: notifications request, twice from same sqnum" $
+  \step -> withContext $ \ctx -> do
+    step "Setup"
+    ep <- makeEndpoint
+    (mockBroker, broState) <- mkMockBroker ["demo"]
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+      withSocket ctx Req $ \sock -> do
+        connectAndSendOrder step sock defaultOrder ep
+        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
+        localOrderId @=? orderId defaultOrder
+        threadDelay 10000
+
+        globalOrderId <- orderId . head . orders <$> readIORef broState
+
+        (Just cb) <- notificationCallback <$> readIORef broState
+        cb (BackendOrderNotification globalOrderId Executed)
+        let trade = Trade {
+          tradeOrderId = globalOrderId,
+          tradePrice = 19.82,
+          tradeQuantity = 1,
+          tradeVolume = 1982,
+          tradeVolumeCurrency = "TEST_CURRENCY",
+          tradeOperation = Buy,
+          tradeAccount = "demo",
+          tradeSecurity = "FOO",
+          tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
+          tradeCommission = 0,
+          tradeSignalId = SignalId "Foo" "bar" "baz" }
+        cb (BackendTradeNotification trade)
+
+        step "Sending notifications request"
+        send sock [] (BL.toStrict . encode $ RequestNotifications 2 "identity" (NotificationSqnum 1))
+        threadDelay 10000
+
+        step "Reading response"
+        resp <- decode . BL.fromStrict <$> receive sock
+        case resp of
+          Just (ResponseNotifications ns) -> do
+            step "Received notification sqnums are correct"
+            let sqnums = sort $ fmap (unNotificationSqnum . getNotificationSqnum) ns
+            sqnums @=? [1, 2, 3]
+
+
+          _ -> assertFailure "Invalid response"
+
         step "Sending second notifications request"
-        send sock [] (BL.toStrict . encode $ RequestNotifications 3 "identity")
+        send sock [] (BL.toStrict . encode $ RequestNotifications 3 "identity" (NotificationSqnum 1))
         threadDelay 10000
 
         step "Reading response"
         resp' <- decode . BL.fromStrict <$> receive sock
         case resp' of
           Just (ResponseNotifications ns) -> do
-            0 @=? length ns
-          Just _ -> assertFailure "Invalid response"
-          Nothing -> assertFailure "Invalid response"
+            step "Received notification sqnums are correct"
+            let sqnums = sort $ fmap (unNotificationSqnum . getNotificationSqnum) ns
+            [1, 2, 3] @=? sqnums
+          _ -> assertFailure "Invalid response"
+
+testBrokerServerGetNotificationsRemovesEarlierNotifications :: TestTree
+testBrokerServerGetNotificationsRemovesEarlierNotifications = testCaseSteps "Broker Server: notifications request removes earlier notifications" $
+  \step -> withContext $ \ctx -> do
+    step "Setup"
+    ep <- makeEndpoint
+    (mockBroker, broState) <- mkMockBroker ["demo"]
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+      withSocket ctx Req $ \sock -> do
+        connectAndSendOrder step sock defaultOrder ep
+        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
+        localOrderId @=? orderId defaultOrder
+        threadDelay 10000
+
+        globalOrderId <- orderId . head . orders <$> readIORef broState
+
+        (Just cb) <- notificationCallback <$> readIORef broState
+        cb (BackendOrderNotification globalOrderId Executed)
+        let trade = Trade {
+          tradeOrderId = globalOrderId,
+          tradePrice = 19.82,
+          tradeQuantity = 1,
+          tradeVolume = 1982,
+          tradeVolumeCurrency = "TEST_CURRENCY",
+          tradeOperation = Buy,
+          tradeAccount = "demo",
+          tradeSecurity = "FOO",
+          tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
+          tradeCommission = 0,
+          tradeSignalId = SignalId "Foo" "bar" "baz" }
+        cb (BackendTradeNotification trade)
+
+        step "Sending notifications request"
+        send sock [] (BL.toStrict . encode $ RequestNotifications 2 "identity" (NotificationSqnum 4))
+        threadDelay 10000
+
+        step "Reading response"
+        resp <- decode . BL.fromStrict <$> receive sock
+        case resp of
+          Just (ResponseNotifications ns) -> do
+            step "Checking that request list is empty"
+            [] @=? ns
+          _ -> assertFailure "Invalid response"
+
+        step "Sending second notifications request"
+        send sock [] (BL.toStrict . encode $ RequestNotifications 3 "identity" (NotificationSqnum 1))
+        threadDelay 10000
+
+        step "Reading response"
+        resp' <- decode . BL.fromStrict <$> receive sock
+        case resp' of
+          Just (ResponseNotifications ns) -> do
+            step "Checking that request list is empty"
+            [] @=? ns
+          _ -> assertFailure "Invalid response"
 
 testBrokerServerDuplicateRequest :: TestTree
 testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate request" $ \step -> withContext $ \ctx -> do

@@ -8,38 +8,38 @@ module ATrade.Broker.Client (
   getNotifications
 ) where
 
-import ATrade.Types
-import ATrade.Broker.Protocol
-import Control.Concurrent hiding (readChan, writeChan)
-import Control.Concurrent.BoundedChan
-import Control.Concurrent.MVar
-import Control.Exception
-import Control.Monad
-import Control.Monad.Loops
-import Data.Aeson
-import Data.Int
-import Data.IORef
-import Data.Maybe
-import Data.List.NonEmpty
-import qualified Data.List as L
-import qualified Data.Text as T
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as BL
-import Data.Text.Encoding
-import System.ZMQ4
-import System.ZMQ4.ZAP
-import System.Log.Logger
-import System.Timeout
+import           ATrade.Broker.Protocol
+import           ATrade.Types
+import           Control.Concurrent             hiding (readChan, writeChan)
+import           Control.Concurrent.BoundedChan
+import           Control.Concurrent.MVar
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.Loops
+import           Data.Aeson
+import qualified Data.ByteString                as B
+import qualified Data.ByteString.Lazy           as BL
+import           Data.Int
+import           Data.IORef
+import qualified Data.List                      as L
+import           Data.List.NonEmpty
+import           Data.Maybe
+import qualified Data.Text                      as T
+import           Data.Text.Encoding
+import           System.Log.Logger
+import           System.Timeout
+import           System.ZMQ4
+import           System.ZMQ4.ZAP
 
 data BrokerClientHandle = BrokerClientHandle {
-  tid :: ThreadId,
-  completionMvar :: MVar (),
-  killMvar :: MVar (),
-  submitOrder :: Order -> IO (Either T.Text OrderId),
-  cancelOrder :: OrderId -> IO (Either T.Text ()),
+  tid              :: ThreadId,
+  completionMvar   :: MVar (),
+  killMvar         :: MVar (),
+  submitOrder      :: Order -> IO (Either T.Text OrderId),
+  cancelOrder      :: OrderId -> IO (Either T.Text ()),
   getNotifications :: IO (Either T.Text [Notification]),
-  cmdVar :: MVar BrokerServerRequest,
-  respVar :: MVar BrokerServerResponse
+  cmdVar           :: MVar BrokerServerRequest,
+  respVar          :: MVar BrokerServerResponse
 }
 
 brokerClientThread :: B.ByteString -> Context -> T.Text -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> MVar () -> MVar () -> ClientSecurityParams -> IO ()
@@ -60,10 +60,10 @@ brokerClientThread socketIdentity ctx ep cmd resp comp killMv secParams = finall
         debugM "Broker.Client" $ "Connecting to: " ++ show (T.unpack ep)
         case cspCertificate secParams of
           Just clientCert -> zapApplyCertificate clientCert sock
-          Nothing -> return ()
+          Nothing         -> return ()
         case cspServerCertificate secParams of
           Just serverCert -> zapSetServerCertificate serverCert sock
-          Nothing -> return ()
+          Nothing         -> return ()
 
         connect sock $ T.unpack ep
         debugM "Broker.Client" $ "Connected"
@@ -115,8 +115,8 @@ bcSubmitOrder clientIdentity idCounter cmdVar respVar order = do
   resp <- takeMVar respVar
   case resp of
     (ResponseOrderSubmitted oid) -> return $ Right oid
-    (ResponseError msg) -> return $ Left msg
-    _ -> return $ Left "Unknown error"
+    (ResponseError msg)          -> return $ Left msg
+    _                            -> return $ Left "Unknown error"
 
 bcCancelOrder :: ClientIdentity -> IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> OrderId -> IO (Either T.Text ())
 bcCancelOrder clientIdentity idCounter cmdVar respVar orderId = do
@@ -125,15 +125,15 @@ bcCancelOrder clientIdentity idCounter cmdVar respVar orderId = do
   resp <- takeMVar respVar
   case resp of
     (ResponseOrderCancelled oid) -> return $ Right ()
-    (ResponseError msg) -> return $ Left msg
-    _ -> return $ Left "Unknown error"
+    (ResponseError msg)          -> return $ Left msg
+    _                            -> return $ Left "Unknown error"
 
 bcGetNotifications :: ClientIdentity -> IORef RequestSqnum -> MVar BrokerServerRequest -> MVar BrokerServerResponse -> IO (Either T.Text [Notification])
 bcGetNotifications clientIdentity idCounter cmdVar respVar = do
   sqnum <- nextId idCounter
-  putMVar cmdVar (RequestNotifications sqnum clientIdentity)
+  putMVar cmdVar (RequestNotifications sqnum clientIdentity (NotificationSqnum 0))
   resp <- takeMVar respVar
   case resp of
     (ResponseNotifications ns) -> return $ Right ns
-    (ResponseError msg) -> return $ Left msg
-    _ -> return $ Left "Unknown error"
+    (ResponseError msg)        -> return $ Left msg
+    _                          -> return $ Left "Unknown error"
