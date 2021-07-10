@@ -1,9 +1,14 @@
-{-# LANGUAGE OverloadedStrings, MultiWayIf, RecordWildCards #-}
+{-# LANGUAGE MultiWayIf        #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes       #-}
+{-# LANGUAGE RecordWildCards   #-}
 
 module ATrade.Broker.Protocol (
   BrokerServerRequest(..),
   BrokerServerResponse(..),
   Notification(..),
+  NotificationSqnum(..),
+  nextSqnum,
   notificationOrderId,
   RequestSqnum(..),
   requestSqnum,
@@ -12,21 +17,64 @@ module ATrade.Broker.Protocol (
   ClientIdentity(..)
 ) where
 
-import Control.Error.Util
-import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as T
-import Data.Text.Format
-import Data.Text.Encoding
-import Data.Aeson
-import Data.Aeson.Types hiding (parse)
-import Data.Int
-import Data.Time.Clock
-import Data.Time.Calendar
-import ATrade.Types
-import Text.Parsec
+import           ATrade.Types
+import           Control.Applicative
+import           Control.Error.Util
+import           Data.Aeson
+import           Data.Aeson.Types        hiding (parse)
+import qualified Data.HashMap.Strict     as HM
+import           Data.Int
+import qualified Data.Text               as T
+import           Data.Text.Encoding
+import           Data.Time.Calendar
+import           Data.Time.Clock
+import           Language.Haskell.Printf
+import           Text.Parsec             hiding ((<|>))
 
 type ClientIdentity = T.Text
 type RequestSqnum = Int64
+
+newtype NotificationSqnum = NotificationSqnum { unNotificationSqnum :: Int64 }
+  deriving (Eq, Show)
+
+nextSqnum :: NotificationSqnum -> NotificationSqnum
+nextSqnum (NotificationSqnum n) = NotificationSqnum (n + 1)
+
+data Notification = OrderNotification NotificationSqnum OrderId OrderState | TradeNotification NotificationSqnum Trade
+  deriving (Eq, Show)
+
+notificationSqnum :: Notification -> NotificationSqnum
+notificationSqnum (OrderNotification sqnum _ _) = sqnum
+notificationSqnum (TradeNotification sqnum _)   = sqnum
+
+notificationOrderId :: Notification -> OrderId
+notificationOrderId (OrderNotification _ oid _) = oid
+notificationOrderId (TradeNotification _ trade) = tradeOrderId trade
+
+instance FromJSON Notification where
+  parseJSON = withObject "notification" $ \obj -> parseNotification obj
+    where
+      parseNotification obj =
+        case HM.lookup "notification-sqnum" obj of
+          Just (Number sqnum) -> parseTrade (NotificationSqnum $ truncate sqnum) obj <|>
+                                 parseOrder (NotificationSqnum $ truncate sqnum) obj <|>
+                                 fail "Can't parse notification"
+          Just _ -> fail "Invalid sqnum"
+          Nothing -> fail "Unable to lookup notification sqnum"
+      parseTrade sqnum obj = case HM.lookup "trade" obj of
+        Just val -> TradeNotification sqnum <$> (parseJSON val)
+        Nothing  -> fail "Can't parse trade"
+      parseOrder sqnum obj = case HM.lookup "order-state" obj of
+        Just v -> withObject "object" (\os -> do
+          oid <- os .: "order-id"
+          ns <- os .: "new-state"
+          return $ OrderNotification sqnum oid ns) v
+        Nothing -> fail "Should be order-state"
+
+instance ToJSON Notification where
+  toJSON (OrderNotification sqnum oid newState) = object [ "notification-sqnum" .= toJSON (unNotificationSqnum sqnum), "order-state" .= object [ "order-id" .= oid, "new-state" .= newState ] ]
+  toJSON (TradeNotification sqnum trade) = object [ "notification-sqnum" .= toJSON (unNotificationSqnum sqnum), "trade" .= toJSON trade ]
+
 
 data BrokerServerRequest = RequestSubmitOrder RequestSqnum ClientIdentity Order
   | RequestCancelOrder RequestSqnum ClientIdentity OrderId
@@ -75,17 +123,18 @@ data BrokerServerResponse = ResponseOrderSubmitted OrderId
 instance FromJSON BrokerServerResponse where
   parseJSON = withObject "object" (\obj ->
     if | HM.member "order-id" obj -> do
-        oid <- obj .: "order-id"
-        return $ ResponseOrderSubmitted oid
+           oid <- obj .: "order-id"
+           return $ ResponseOrderSubmitted oid
        | HM.member "order-cancelled" obj -> do
-        oid <- obj .: "order-cancelled"
-        return $ ResponseOrderCancelled oid
+           oid <- obj .: "order-cancelled"
+           return $ ResponseOrderCancelled oid
        | HM.member "notifications" obj -> do
-        notifications <- obj .: "notifications"
-        ResponseNotifications <$> parseJSON notifications
+           notifications <- obj .: "notifications"
+           ResponseNotifications <$> parseJSON notifications
        | HM.member "error" obj -> do
-        error <- obj .: "error"
-        ResponseError <$> parseJSON error)
+           error <- obj .: "error"
+           ResponseError <$> parseJSON error
+       | otherwise -> fail "Unable to parse BrokerServerResponse")
 
 instance ToJSON BrokerServerResponse where
   toJSON (ResponseOrderSubmitted oid) = object [ "order-id" .= oid ]
@@ -93,43 +142,17 @@ instance ToJSON BrokerServerResponse where
   toJSON (ResponseNotifications notifications) = object [ "notifications" .= notifications ]
   toJSON (ResponseError errorMessage) = object [ "error" .= errorMessage ]
 
-data Notification = OrderNotification OrderId OrderState | TradeNotification Trade
-  deriving (Eq, Show)
-
-notificationOrderId :: Notification -> OrderId
-notificationOrderId (OrderNotification oid _) = oid
-notificationOrderId (TradeNotification trade) = tradeOrderId trade
-
-instance FromJSON Notification where
-  parseJSON n = withObject "notification" (\obj ->
-    case HM.lookup "trade" obj of
-      Just v -> parseTrade v
-      Nothing -> parseOrder n) n
-    where
-      parseTrade v = TradeNotification <$> parseJSON v
-      parseOrder (Object o) = case HM.lookup "order-state" o of
-        Just v -> withObject "object" (\os -> do
-          oid <- os .: "order-id"
-          ns <- os .: "new-state"
-          return $ OrderNotification oid ns) v
-        Nothing -> fail "Should be order-state"
-      parseOrder _ = fail "Unable to parse order state"
-
-instance ToJSON Notification where
-  toJSON (OrderNotification oid newState) = object ["order-state" .= object [ "order-id" .= oid, "new-state" .= newState] ]
-  toJSON (TradeNotification trade) = object ["trade" .= toJSON trade]
-
 data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {
-  tsAccountId :: T.Text,
-  tsSecurity :: T.Text,
-  tsPrice :: Double,
-  tsQuantity :: Int,
-  tsVolume :: Double,
-  tsCurrency :: T.Text,
-  tsOperation :: Operation,
+  tsAccountId     :: T.Text,
+  tsSecurity      :: T.Text,
+  tsPrice         :: Double,
+  tsQuantity      :: Int,
+  tsVolume        :: Double,
+  tsCurrency      :: T.Text,
+  tsOperation     :: Operation,
   tsExecutionTime :: UTCTime,
-  tsCommission :: Double,
-  tsSignalId :: SignalId
+  tsCommission    :: Double,
+  tsSignalId      :: SignalId
 } deriving (Show, Eq)
 
 mkTradeMessage trade = TradeSinkTrade {
@@ -153,10 +176,10 @@ getHMS (UTCTime _ diff) = (intsec `div` 3600, (intsec `mod` 3600) `div` 60, ints
     intsec = floor diff
     msec = floor $ (diff - fromIntegral intsec) * 1000
 
-formatTimestamp dt = format "{}-{}-{} {}:{}:{}.{}" (left 4 '0' y, left 2 '0' m, left 2 '0' d, left 2 '0' hour, left 2 '0' min, left 2 '0' sec, left 3 '0' msec)
+formatTimestamp dt = [t|%04d-%02d-%02d %02d:%02d:%02d.%03d|] y m d hour min sec msec
   where
     (y, m, d) = toGregorian $ utctDay dt
-    (hour, min, sec, msec) = getHMS dt 
+    (hour, min, sec, msec) = getHMS dt
 
 parseTimestamp (String t) = case hush $ parse p "" t of
   Just ts -> return ts
@@ -199,7 +222,7 @@ instance ToJSON TradeSinkMessage where
 instance FromJSON TradeSinkMessage where
   parseJSON = withObject "object" (\obj ->
     case HM.lookup "command" obj of
-      Nothing -> parseTrade obj
+      Nothing  -> parseTrade obj
       Just cmd -> return TradeSinkHeartBeat)
     where
       parseTrade obj = case HM.lookup "trade" obj of

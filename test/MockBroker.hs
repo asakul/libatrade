@@ -7,25 +7,26 @@ module MockBroker (
   mkMockBroker
 ) where
 
-import ATrade.Types
-import ATrade.Broker.Protocol
-import ATrade.Broker.Server
-import ATrade.Util
-import Data.IORef
-import qualified Data.List as L
+import           ATrade.Broker.Protocol
+import           ATrade.Broker.Server
+import           ATrade.Types
+import           ATrade.Util
+import           Data.IORef
+import qualified Data.List              as L
 
 data MockBrokerState = MockBrokerState {
-  orders :: [Order],
-  cancelledOrders :: [Order],
-  notificationCallback :: Maybe (Notification -> IO ())
+  orders               :: [Order],
+  cancelledOrders      :: [Order],
+  notificationCallback :: Maybe (Notification -> IO ()),
+  sqnum                :: NotificationSqnum
 }
 
 mockSubmitOrder :: IORef MockBrokerState -> Order -> IO ()
 mockSubmitOrder state order = do
-  atomicMapIORef state (\s -> s { orders = submittedOrder : orders s })
+  sqnum <- atomicModifyIORef' state (\s -> (s { orders = submittedOrder : orders s, sqnum = nextSqnum (sqnum s) }, sqnum s))
   maybeCb <- notificationCallback <$> readIORef state
   case maybeCb of
-    Just cb -> cb $ OrderNotification (orderId order) Submitted
+    Just cb -> cb $ OrderNotification sqnum (orderId order) Submitted
     Nothing -> return ()
   where
     submittedOrder = order { orderState = Submitted }

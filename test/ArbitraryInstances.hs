@@ -21,6 +21,9 @@ notTooBig x = abs x < 100000000
 
 arbitraryTickerId = arbitrary `suchThat` (T.all (/= ':'))
 
+instance Arbitrary NotificationSqnum where
+  arbitrary = NotificationSqnum <$> arbitrary
+
 instance Arbitrary Tick where
   arbitrary = Tick <$>
     arbitraryTickerId <*>
@@ -96,10 +99,11 @@ instance Arbitrary Notification where
     t <- choose (1, 2) :: Gen Int
     if t == 1
       then do
+        sqnum <- arbitrary
         oid <- arbitrary
         state <- arbitrary
-        return $ OrderNotification oid state
-      else TradeNotification <$> arbitrary
+        return $ OrderNotification sqnum oid state
+      else TradeNotification <$> arbitrary <*> arbitrary
 
 instance Arbitrary BrokerServerRequest where
   arbitrary = do
