@@ -7,6 +7,7 @@ module MockBroker (
   mkMockBroker
 ) where
 
+import           ATrade.Broker.Backend
 import           ATrade.Broker.Protocol
 import           ATrade.Broker.Server
 import           ATrade.Types
@@ -17,26 +18,25 @@ import qualified Data.List              as L
 data MockBrokerState = MockBrokerState {
   orders               :: [Order],
   cancelledOrders      :: [Order],
-  notificationCallback :: Maybe (Notification -> IO ()),
-  sqnum                :: NotificationSqnum
+  notificationCallback :: Maybe (BrokerBackendNotification -> IO ())
 }
 
 mockSubmitOrder :: IORef MockBrokerState -> Order -> IO ()
 mockSubmitOrder state order = do
-  sqnum <- atomicModifyIORef' state (\s -> (s { orders = submittedOrder : orders s, sqnum = nextSqnum (sqnum s) }, sqnum s))
+  atomicModifyIORef' state (\s -> (s { orders = submittedOrder : orders s }, ()))
   maybeCb <- notificationCallback <$> readIORef state
   case maybeCb of
-    Just cb -> cb $ OrderNotification sqnum (orderId order) Submitted
+    Just cb -> cb $ BackendOrderNotification (orderId order) Submitted
     Nothing -> return ()
   where
     submittedOrder = order { orderState = Submitted }
 
-mockCancelOrder :: IORef MockBrokerState -> OrderId -> IO Bool
+mockCancelOrder :: IORef MockBrokerState -> OrderId -> IO ()
 mockCancelOrder state oid = do
   ors <- orders <$> readIORef state
   case L.find (\o -> orderId o == oid) ors of
-    Just order -> atomicModifyIORef' state (\s -> (s { cancelledOrders = order : cancelledOrders s}, True))
-    Nothing -> return False
+    Just order -> atomicModifyIORef' state (\s -> (s { cancelledOrders = order : cancelledOrders s}, ()))
+    Nothing -> return ()
 
 mockStopBroker :: IORef MockBrokerState -> IO ()
 mockStopBroker state = return ()
@@ -49,11 +49,11 @@ mkMockBroker accs = do
     notificationCallback = Nothing
   }
 
-  return (BrokerInterface {
+  return (BrokerBackend {
     accounts = accs,
     setNotificationCallback = \cb -> atomicMapIORef state (\s -> s { notificationCallback = cb }),
     submitOrder = mockSubmitOrder state,
     cancelOrder = mockCancelOrder state,
-    stopBroker = mockStopBroker state
+    stop = mockStopBroker state
   }, state)
 

@@ -3,69 +3,67 @@
 module ATrade.Broker.Server (
   startBrokerServer,
   stopBrokerServer,
-  BrokerInterface(..),
+  BrokerBackend(..),
   TradeSink
 ) where
 
-import ATrade.Types
-import ATrade.Broker.Protocol
-import System.ZMQ4
-import System.ZMQ4.ZAP
-import Data.List.NonEmpty
-import qualified Data.Map as M
-import qualified Data.ByteString as B hiding (putStrLn)
-import qualified Data.ByteString.Lazy as BL hiding (putStrLn)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as E
-import qualified Data.List as L
-import Data.Aeson
-import Data.Maybe
-import Data.Time.Clock
-import Data.IORef
-import Control.Concurrent hiding (readChan, writeChan)
-import Control.Concurrent.BoundedChan
-import Control.Exception
-import Control.Monad
-import Control.Monad.Loops
-import System.Log.Logger
-import System.Timeout
-import ATrade.Util
+import           ATrade.Broker.Backend
+import           ATrade.Broker.Protocol
+import           ATrade.Types
+import           ATrade.Util
+import           Control.Concurrent             hiding (readChan, writeChan)
+import           Control.Concurrent.BoundedChan
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.Loops
+import           Data.Aeson
+import qualified Data.Bimap                     as BM
+import qualified Data.ByteString                as B hiding (putStrLn)
+import qualified Data.ByteString.Lazy           as BL hiding (putStrLn)
+import           Data.IORef
+import qualified Data.List                      as L
+import           Data.List.NonEmpty
+import qualified Data.Map                       as M
+import           Data.Maybe
+import qualified Data.Text                      as T
+import qualified Data.Text.Encoding             as E
+import           Data.Time.Clock
+import           System.Log.Logger
+import           System.Timeout
+import           System.ZMQ4
+import           System.ZMQ4.ZAP
 
 newtype OrderIdGenerator = IO OrderId
 type PeerId = B.ByteString
 
-data BrokerInterface = BrokerInterface {
-  accounts :: [T.Text],
-  setNotificationCallback :: Maybe (Notification -> IO()) -> IO (),
-  submitOrder :: Order -> IO (),
-  cancelOrder :: OrderId -> IO Bool,
-  stopBroker :: IO ()
-}
+data FullOrderId = FullOrderId ClientIdentity OrderId
+  deriving (Show, Eq, Ord)
 
 data BrokerServerState = BrokerServerState {
-  bsSocket :: Socket Router,
-  orderToBroker :: M.Map OrderId BrokerInterface,
-  orderMap :: M.Map OrderId ClientIdentity, -- Matches 0mq client identities with corresponding orders
-  lastPacket :: M.Map PeerId (RequestSqnum, BrokerServerResponse),
+  bsSocket             :: Socket Router,
+  orderToBroker        :: M.Map FullOrderId BrokerBackend,
+  orderMap             :: BM.Bimap FullOrderId OrderId,
+  lastPacket           :: M.Map PeerId (RequestSqnum, BrokerServerResponse),
   pendingNotifications :: M.Map ClientIdentity [Notification],
-  brokers :: [BrokerInterface],
-  completionMvar :: MVar (),
-  killMvar :: MVar (),
-  orderIdCounter :: OrderId,
-  tradeSink :: BoundedChan Trade
+  notificationSqnum    :: M.Map ClientIdentity NotificationSqnum,
+  brokers              :: [BrokerBackend],
+  completionMvar       :: MVar (),
+  killMvar             :: MVar (),
+  orderIdCounter       :: OrderId,
+  tradeSink            :: BoundedChan Trade
 }
 
 data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar ())
 
 type TradeSink = Trade -> IO ()
 
-startBrokerServer :: [BrokerInterface] -> Context -> T.Text -> [TradeSink] -> ServerSecurityParams -> IO BrokerServerHandle
+startBrokerServer :: [BrokerBackend] -> Context -> T.Text -> [TradeSink] -> ServerSecurityParams -> IO BrokerServerHandle
 startBrokerServer brokers c ep tradeSinks params = do
   sock <- socket c Router
   setLinger (restrict 0) sock
   case sspDomain params of
     Just domain -> setZapDomain (restrict $ E.encodeUtf8 domain) sock
-    Nothing -> return ()
+    Nothing     -> return ()
   case sspCertificate params of
     Just cert -> do
       setCurveServer True sock
@@ -78,10 +76,11 @@ startBrokerServer brokers c ep tradeSinks params = do
   tsChan <- newBoundedChan 100
   state <- newIORef BrokerServerState {
     bsSocket = sock,
-    orderMap = M.empty,
+    orderMap = BM.empty,
     orderToBroker = M.empty,
     lastPacket = M.empty,
     pendingNotifications = M.empty,
+    notificationSqnum = M.empty,
     brokers = brokers,
     completionMvar = compMv,
     killMvar = killMv,
@@ -93,16 +92,22 @@ startBrokerServer brokers c ep tradeSinks params = do
   debugM "Broker.Server" "Forking broker server thread"
   BrokerServerHandle <$> forkIO (brokerServerThread state) <*> forkIO (tradeSinkHandler c state tradeSinks) <*> pure compMv <*> pure killMv
 
-notificationCallback :: IORef BrokerServerState -> Notification -> IO ()
+notificationCallback :: IORef BrokerServerState -> BrokerBackendNotification -> IO ()
 notificationCallback state n = do
   debugM "Broker.Server" $ "Notification: " ++ show n
   chan <- tradeSink <$> readIORef state
   case n of
-    TradeNotification trade -> tryWriteChan chan trade
-    _ -> return False
+    BackendTradeNotification trade -> tryWriteChan chan trade
+    _                              -> return False
   orders <- orderMap <$> readIORef state
-  case M.lookup (notificationOrderId n) orders of
-    Just clientIdentity -> addNotification clientIdentity n
+  case BM.lookupR (backendNotificationOrderId n) orders of
+    Just (FullOrderId clientIdentity localOrderId) -> do
+      sqnum <- atomicModifyIORef' state (\s -> let sqnum = M.findWithDefault (NotificationSqnum 1) clientIdentity (notificationSqnum s) in
+                                                          (s { notificationSqnum = M.insert clientIdentity (nextSqnum sqnum) (notificationSqnum s) },
+                                                           sqnum))
+      case n of
+        BackendTradeNotification trade -> addNotification clientIdentity (TradeNotification sqnum trade { tradeOrderId = localOrderId })
+        BackendOrderNotification globalOrderId newstate -> addNotification clientIdentity (OrderNotification sqnum localOrderId newstate)
     Nothing -> warningM "Broker.Server" "Notification: unknown order"
 
   where
@@ -118,7 +123,7 @@ tradeSinkHandler c state tradeSinks = unless (null tradeSinks) $
       maybeTrade <- tryReadChan chan
       case maybeTrade of
         Just trade -> mapM_ (\x -> x trade) tradeSinks
-        Nothing -> threadDelay 100000
+        Nothing    -> threadDelay 100000
     where
       wasKilled = isJust <$> (killMvar <$> readIORef state >>= tryReadMVar)
 
@@ -178,23 +183,26 @@ brokerServerThread state = finally brokerServerThread' cleanup
           debugM "Broker.Server" $ "Request: submit order:" ++ show request
           case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
-              oid <- nextOrderId
+              globalOrderId <- nextOrderId
+              let fullOrderId = (FullOrderId clientIdentity (orderId order))
               atomicMapIORef state (\s -> s {
-                orderToBroker = M.insert oid bro (orderToBroker s),
-                orderMap = M.insert oid clientIdentity (orderMap s) })
-              submitOrder bro order { orderId = oid }
-              return $ ResponseOrderSubmitted oid
+                orderToBroker = M.insert fullOrderId bro (orderToBroker s),
+                orderMap = BM.insert fullOrderId globalOrderId (orderMap s) })
+              submitOrder bro order { orderId = globalOrderId }
+              return $ ResponseOrderSubmitted (orderId order)
 
             Nothing -> do
-              debugM "Broker.Server" $ "Unknown account: " ++ T.unpack (orderAccountId order)
+              warningM "Broker.Server" $ "Unknown account: " ++ T.unpack (orderAccountId order)
               return $ ResponseError "Unknown account"
-        RequestCancelOrder sqnum clientIdentity oid -> do
+        RequestCancelOrder sqnum clientIdentity localOrderId -> do
           m <- orderToBroker <$> readIORef state
-          case M.lookup oid m of
-            Just bro -> do
-              cancelOrder bro oid
-              return $ ResponseOrderCancelled oid
-            Nothing -> return $ ResponseError "Unknown order"
+          bm <- orderMap <$> readIORef state
+          let fullOrderId = FullOrderId clientIdentity localOrderId
+          case (M.lookup fullOrderId m, BM.lookup fullOrderId bm) of
+            (Just bro, Just globalOrderId) -> do
+              cancelOrder bro globalOrderId
+              return $ ResponseOrderCancelled localOrderId
+            _ -> return $ ResponseError "Unknown order"
         RequestNotifications sqnum clientIdentity -> do
           maybeNs <- M.lookup clientIdentity . pendingNotifications <$> readIORef state
           case maybeNs of

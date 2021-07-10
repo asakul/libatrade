@@ -18,7 +18,7 @@ module ATrade.Broker.Protocol (
 ) where
 
 import           ATrade.Types
-import           Control.Applicative
+import           Control.Applicative     ((<|>))
 import           Control.Error.Util
 import           Data.Aeson
 import           Data.Aeson.Types        hiding (parse)

@@ -1,39 +1,41 @@
-{-# LANGUAGE OverloadedStrings, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
 
 module TestBrokerServer (
   unitTests
 ) where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import           Test.Tasty
+import           Test.Tasty.HUnit
 
-import ATrade.Types
-import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as BL
-import ATrade.Broker.Server
-import ATrade.Broker.Protocol
-import qualified Data.Text as T
-import Control.Concurrent hiding (writeChan)
-import Control.Exception
-import System.ZMQ4
-import Data.Aeson
-import Data.Time.Clock
-import Data.Time.Calendar
-import Data.IORef
-import Data.UUID as U
-import Data.UUID.V4 as UV4
-import MockBroker
+import           ATrade.Broker.Backend
+import           ATrade.Broker.Protocol
+import           ATrade.Broker.Server
+import           ATrade.Types
+import           Control.Concurrent     hiding (writeChan)
+import           Control.Exception
+import           Data.Aeson
+import qualified Data.ByteString        as B
+import qualified Data.ByteString.Lazy   as BL
+import           Data.IORef
+import qualified Data.Text              as T
+import           Data.Time.Calendar
+import           Data.Time.Clock
+import           Data.UUID              as U
+import           Data.UUID.V4           as UV4
+import           MockBroker
+import           System.ZMQ4
 
 unitTests :: TestTree
 unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerSubmitOrder
+  , testBrokerServerSubmitOrderDifferentIdentities
   , testBrokerServerSubmitOrderToUnknownAccount
   , testBrokerServerCancelOrder
   , testBrokerServerCancelUnknownOrder
   , testBrokerServerCorruptedPacket
   , testBrokerServerGetNotifications
-  , testBrokerServerDuplicateRequest
-  , testBrokerServerTradeSink ]
+  , testBrokerServerDuplicateRequest ]
 
 --
 -- Few helpers
@@ -53,8 +55,18 @@ connectAndSendOrder step sock order ep = do
   send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 "identity" order)
   threadDelay 10000
 
+connectAndSendOrderWithIdentity :: (Sender a) => (String -> IO ()) -> Socket a -> Order -> ClientIdentity -> T.Text -> IO ()
+connectAndSendOrderWithIdentity step sock order clientIdentity ep = do
+  step "Connecting"
+  connect sock (T.unpack ep)
+
+  step $ "Sending request for identity: " ++ show clientIdentity
+  send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 clientIdentity order)
+  threadDelay 10000
+
 defaultOrder :: Order
 defaultOrder = mkOrder {
+    orderId = 25,
     orderAccountId = "demo",
     orderSecurity = "FOO",
     orderPrice = Market,
@@ -68,7 +80,7 @@ makeTestTradeSink = do
   return (ref, f ref)
   where
     f ref t = writeIORef ref $ Just t
-      
+
 
 --
 -- Tests
@@ -81,12 +93,12 @@ testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withCont
   stopBrokerServer broS)
 
 testBrokerServerSubmitOrder :: TestTree
-testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext (\ctx -> do
+testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext $ \ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\_ -> do
-    withSocket ctx Req (\sock -> do
+  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+    withSocket ctx Req $ \sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
       step "Checking that order is submitted to BrokerInterface"
@@ -97,10 +109,39 @@ testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \ste
       resp <- decode . BL.fromStrict <$> receive sock
       case resp of
         Just (ResponseOrderSubmitted _) -> return ()
-        Just _ -> assertFailure "Invalid response"
-        Nothing -> assertFailure "Invalid response"
+        Just _                          -> assertFailure "Invalid response"
+        Nothing                         -> assertFailure "Invalid response"
 
-      )))
+testBrokerServerSubmitOrderDifferentIdentities :: TestTree
+testBrokerServerSubmitOrderDifferentIdentities = testCaseSteps "Broker Server submits order: different identities" $ \step -> withContext $ \ctx -> do
+  step "Setup"
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+  ep <- makeEndpoint
+  let orderId1 = 42
+  let orderId2 = 76
+  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+    withSocket ctx Req $ \sock1 -> do
+      withSocket ctx Req $ \sock2 -> do
+        connectAndSendOrderWithIdentity step sock1 defaultOrder {orderId = orderId1} "identity1" ep
+        connectAndSendOrderWithIdentity step sock2 defaultOrder {orderId = orderId2} "identity2" ep
+
+        step "Checking that orders are submitted to BrokerInterface"
+        s <- readIORef broState
+        (length . orders) s @?= 2
+
+        step "Reading response for identity1"
+        resp <- decode . BL.fromStrict <$> receive sock1
+        case resp of
+          Just (ResponseOrderSubmitted localOrderId) -> localOrderId @=? orderId1
+          Just _                          -> assertFailure "Invalid response"
+          Nothing                         -> assertFailure "Invalid response"
+
+        step "Reading response for identity2"
+        resp <- decode . BL.fromStrict <$> receive sock2
+        case resp of
+          Just (ResponseOrderSubmitted localOrderId) -> localOrderId @=? orderId2
+          Just _                          -> assertFailure "Invalid response"
+          Nothing                         -> assertFailure "Invalid response"
 
 testBrokerServerSubmitOrderToUnknownAccount :: TestTree
 testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server returns error if account is unknown" $
@@ -116,27 +157,28 @@ testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server retur
         resp <- decode . BL.fromStrict <$> receive sock
         case resp of
           Just (ResponseError _) -> return ()
-          Just _ -> assertFailure "Invalid response"
-          Nothing -> assertFailure "Invalid response"
+          Just _                 -> assertFailure "Invalid response"
+          Nothing                -> assertFailure "Invalid response"
 
         )))
 
 testBrokerServerCancelOrder :: TestTree
 testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order cancellation" $
-  \step -> withContext (\ctx -> do
+  \step -> withContext $ \ctx -> do
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\_ ->
-      withSocket ctx Req (\sock -> do
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+      withSocket ctx Req $ \sock -> do
         connectAndSendOrder step sock defaultOrder ep
-        (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
+        localOrderId @=? (orderId defaultOrder)
 
         step "Sending order cancellation request"
-        send sock [] (BL.toStrict . encode $ RequestCancelOrder 2 "identity" orderId)
+        send sock [] (BL.toStrict . encode $ RequestCancelOrder 2 "identity" localOrderId)
         threadDelay 10000
 
-        step "Checking that order is cancelled in BrokerInterface"
+        step "Checking that order is cancelled in BrokerBackend"
         s <- readIORef broState
         (length . cancelledOrders) s @?= 1
 
@@ -144,9 +186,8 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
         resp <- decode . BL.fromStrict <$> receive sock
         case resp of
           Just (ResponseOrderCancelled _) -> return ()
-          Just _ -> assertFailure "Invalid response"
-          Nothing -> assertFailure "Invalid response"
-        )))
+          Just _                          -> assertFailure "Invalid response"
+          Nothing                         -> assertFailure "Invalid response"
 
 testBrokerServerCancelUnknownOrder :: TestTree
 testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancellation: error if order is unknown" $
@@ -167,8 +208,8 @@ testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancell
         resp <- decode . BL.fromStrict <$> receive sock
         case resp of
           Just (ResponseError _) -> return ()
-          Just _ -> assertFailure "Invalid response"
-          Nothing -> assertFailure "Invalid response"
+          Just _                 -> assertFailure "Invalid response"
+          Nothing                -> assertFailure "Invalid response"
         )))
 
 testBrokerServerCorruptedPacket :: TestTree
@@ -190,30 +231,33 @@ testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet
         resp <- decode . BL.fromStrict <$> receive sock
         case resp of
           Just (ResponseError _) -> return ()
-          Just _ -> assertFailure "Invalid response"
-          Nothing -> assertFailure "Invalid response"
+          Just _                 -> assertFailure "Invalid response"
+          Nothing                -> assertFailure "Invalid response"
         )))
   where
     corrupt = B.drop 5
 
 testBrokerServerGetNotifications :: TestTree
 testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications request" $
-  \step -> withContext (\ctx -> do
+  \step -> withContext $ \ctx -> do
     step "Setup"
     ep <- makeEndpoint
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\_ ->
-      withSocket ctx Req (\sock -> do
+    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+      withSocket ctx Req $ \sock -> do
         -- We have to actually submit order, or else server won't know that we should
         -- be notified about this order
         connectAndSendOrder step sock defaultOrder ep
-        (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
+        localOrderId @=? orderId defaultOrder
         threadDelay 10000
 
+        globalOrderId <- orderId . head . orders <$> readIORef broState
+
         (Just cb) <- notificationCallback <$> readIORef broState
-        cb (OrderNotification orderId Executed)
+        cb (BackendOrderNotification globalOrderId Executed)
         let trade = Trade {
-          tradeOrderId = orderId,
+          tradeOrderId = globalOrderId,
           tradePrice = 19.82,
           tradeQuantity = 1,
           tradeVolume = 1982,
@@ -224,7 +268,7 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
           tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
           tradeCommission = 0,
           tradeSignalId = SignalId "Foo" "bar" "baz" }
-        cb (TradeNotification trade)
+        cb (BackendTradeNotification trade)
 
         step "Sending notifications request"
         send sock [] (BL.toStrict . encode $ RequestNotifications 2 "identity")
@@ -239,11 +283,12 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
         case resp of
           Just (ResponseNotifications ns) -> do
             length ns @=? 3
-            let (OrderNotification oid newstate) = ns !! 1
-            let (TradeNotification newtrade) = ns !! 2
-            orderId @=? oid
+            let (OrderNotification orderNotificationSqnum oid newstate) = ns !! 1
+            let (TradeNotification tradeNotificationSqnum newtrade) = ns !! 2
+            localOrderId @=? oid
             Executed @=? newstate
-            trade @=? newtrade
+            trade { tradeOrderId = localOrderId } @=? newtrade
+
           Just _ -> assertFailure "Invalid response"
           Nothing -> assertFailure "Invalid response"
 
@@ -258,21 +303,15 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
             0 @=? length ns
           Just _ -> assertFailure "Invalid response"
           Nothing -> assertFailure "Invalid response"
-        )))
 
 testBrokerServerDuplicateRequest :: TestTree
-testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate request" $ \step -> withContext (\ctx -> do
-  putStrLn "epsilon"
+testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate request" $ \step -> withContext $ \ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
   ep <- makeEndpoint
-  putStrLn "delta"
-  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\_ -> do
-    putStrLn "gamma"
-    withSocket ctx Req (\sock -> do
-      putStrLn "alpha"
+  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+    withSocket ctx Req $ \sock -> do
       connectAndSendOrder step sock defaultOrder ep
-      putStrLn "beta"
 
       step "Reading response"
       (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
@@ -289,11 +328,10 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
       resp <- decode . BL.fromStrict <$> receive sock
       case resp of
         Just (ResponseOrderSubmitted oid) -> orderId @?= oid
-        Just _ -> assertFailure "Invalid response"
-        Nothing -> assertFailure "Invalid response"
+        Just _                            -> assertFailure "Invalid response"
+        Nothing                           -> assertFailure "Invalid response"
 
-      )))
-
+{-
 testBrokerServerTradeSink :: TestTree
 testBrokerServerTradeSink = testCaseSteps "Broker Server: sends trades to trade sink" $ \step -> withContext (\ctx -> do
   step "Setup"
@@ -319,7 +357,7 @@ testBrokerServerTradeSink = testCaseSteps "Broker Server: sends trades to trade 
         tradeTimestamp = UTCTime (fromGregorian 2016 9 28) 16000,
         tradeCommission = 0,
         tradeSignalId = SignalId "Foo" "bar" "baz" }
-      cb (TradeNotification trade)
+      cb (BackendTradeNotification trade)
 
       threadDelay 100000
       step "Testing"
@@ -329,3 +367,4 @@ testBrokerServerTradeSink = testCaseSteps "Broker Server: sends trades to trade 
           trade' @?= trade
         _ -> assertFailure "Invalid trade in sink"
       )))
+-}

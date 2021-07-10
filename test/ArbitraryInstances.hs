@@ -1,20 +1,22 @@
-{-# LANGUAGE OverloadedStrings, TypeSynonymInstances, FlexibleInstances #-}
-{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE MultiWayIf           #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module ArbitraryInstances (
 ) where
 
 
-import Test.Tasty.QuickCheck as QC
-import Test.QuickCheck.Instances ()
+import           Test.QuickCheck.Instances ()
+import           Test.Tasty.QuickCheck     as QC
 
-import ATrade.Types
-import ATrade.Price as P
-import qualified Data.Text as T
-import ATrade.Broker.Protocol
+import           ATrade.Broker.Protocol
+import           ATrade.Price              as P
+import           ATrade.Types
+import qualified Data.Text                 as T
 
-import Data.Time.Clock
-import Data.Time.Calendar
+import           Data.Time.Calendar
+import           Data.Time.Clock
 
 notTooBig :: (Num a, Ord a) => a -> Bool
 notTooBig x = abs x < 100000000
@@ -54,7 +56,7 @@ instance Arbitrary OrderPrice where
        | v == 2 -> Limit <$> arbitrary `suchThat` notTooBig
        | v == 3 -> Stop <$> arbitrary `suchThat` notTooBig <*> arbitrary `suchThat` notTooBig
        | v == 4 -> StopMarket <$> arbitrary `suchThat` notTooBig
-       | otherwise -> fail "Invalid case"
+       | otherwise -> error "Invalid case"
 
 instance Arbitrary Operation where
   arbitrary = elements [Buy, Sell]
@@ -136,4 +138,4 @@ instance Arbitrary Bar where
 instance Arbitrary BarTimeframe where
   arbitrary = BarTimeframe <$> (arbitrary `suchThat` (\p -> p > 0 && p < 86400 * 365))
 
-    
+

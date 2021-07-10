@@ -20,6 +20,7 @@ library
                      , ATrade.Price
                      , ATrade.QuoteSource.Client
                      , ATrade.QuoteSource.Server
+                     , ATrade.Broker.Backend
                      , ATrade.Broker.Client
                      , ATrade.Broker.Protocol
                      , ATrade.Broker.Server
@@ -29,32 +30,33 @@ library
                      , ATrade
   other-modules:       Paths_libatrade
   build-depends:       base >= 4.7 && < 5
-                     , time
-                     , datetime
-                     , bytestring
-                     , text
-                     , binary
-                     , aeson
                      , BoundedChan
-                     , hslogger
-                     , zeromq4-haskell
-                     , zeromq4-haskell-zap
-                     , unordered-containers
+                     , aeson
+                     , bimap
+                     , binary
+                     , bytestring
+                     , connection
                      , containers
-                     , monad-loops
-                     , safe
-                     , stm
+                     , datetime
                      , deepseq
                      , errors
-                     , text-format
-                     , parsec
                      , extra
-                     , connection
+                     , gitrev
+                     , hslogger
                      , http-client
                      , http-client-tls
-                     , utf8-string
+                     , monad-loops
+                     , parsec
+                     , safe
                      , scientific
-                     , gitrev
+                     , stm
+                     , text
+                     , th-printf
+                     , time
+                     , unordered-containers
+                     , utf8-string
+                     , zeromq4-haskell
+                     , zeromq4-haskell-zap
   default-language:    Haskell2010
 
 
