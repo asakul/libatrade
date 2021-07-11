@@ -40,42 +40,51 @@ data FullOrderId = FullOrderId ClientIdentity OrderId
   deriving (Show, Eq, Ord)
 
 data BrokerServerState = BrokerServerState {
-  bsSocket             :: Socket Router,
-  orderToBroker        :: M.Map FullOrderId BrokerBackend,
-  orderMap             :: BM.Bimap FullOrderId OrderId,
-  lastPacket           :: M.Map PeerId (RequestSqnum, BrokerServerResponse),
-  pendingNotifications :: M.Map ClientIdentity [Notification],
-  notificationSqnum    :: M.Map ClientIdentity NotificationSqnum,
-  brokers              :: [BrokerBackend],
-  completionMvar       :: MVar (),
-  killMvar             :: MVar (),
-  orderIdCounter       :: OrderId,
-  tradeSink            :: BoundedChan Trade
+  bsSocket              :: Socket Router,
+  bsNotificationsSocket :: Socket Pub,
+  orderToBroker         :: M.Map FullOrderId BrokerBackend,
+  orderMap              :: BM.Bimap FullOrderId OrderId,
+  lastPacket            :: M.Map PeerId (RequestSqnum, BrokerServerResponse),
+  pendingNotifications  :: M.Map ClientIdentity [Notification],
+  notificationSqnum     :: M.Map ClientIdentity NotificationSqnum,
+  brokers               :: [BrokerBackend],
+  completionMvar        :: MVar (),
+  killMvar              :: MVar (),
+  orderIdCounter        :: OrderId,
+  tradeSink             :: BoundedChan Trade
 }
 
 data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar ())
 
 type TradeSink = Trade -> IO ()
 
-startBrokerServer :: [BrokerBackend] -> Context -> T.Text -> [TradeSink] -> ServerSecurityParams -> IO BrokerServerHandle
-startBrokerServer brokers c ep tradeSinks params = do
+startBrokerServer :: [BrokerBackend] -> Context -> T.Text -> T.Text -> [TradeSink] -> ServerSecurityParams -> IO BrokerServerHandle
+startBrokerServer brokers c ep notificationsEp tradeSinks params = do
   sock <- socket c Router
+  notificationsSock <- socket c Pub
   setLinger (restrict 0) sock
+  setLinger (restrict 0) notificationsSock
   case sspDomain params of
-    Just domain -> setZapDomain (restrict $ E.encodeUtf8 domain) sock
+    Just domain -> do
+      setZapDomain (restrict $ E.encodeUtf8 domain) sock
+      setZapDomain (restrict $ E.encodeUtf8 domain) notificationsSock
     Nothing     -> return ()
   case sspCertificate params of
     Just cert -> do
       setCurveServer True sock
       zapApplyCertificate cert sock
+      setCurveServer True notificationsSock
+      zapApplyCertificate cert notificationsSock
     Nothing -> return ()
   bind sock (T.unpack ep)
+  bind notificationsSock (T.unpack notificationsEp)
   tid <- myThreadId
   compMv <- newEmptyMVar
   killMv <- newEmptyMVar
   tsChan <- newBoundedChan 100
   state <- newIORef BrokerServerState {
     bsSocket = sock,
+    bsNotificationsSocket = notificationsSock,
     orderMap = BM.empty,
     orderToBroker = M.empty,
     lastPacket = M.empty,
@@ -111,10 +120,13 @@ notificationCallback state n = do
     Nothing -> warningM "Broker.Server" "Notification: unknown order"
 
   where
-    addNotification clientIdentity n = atomicMapIORef state (\s ->
-      case M.lookup clientIdentity . pendingNotifications $ s of
-        Just ns -> s { pendingNotifications = M.insert clientIdentity (n : ns) (pendingNotifications s)}
-        Nothing -> s { pendingNotifications = M.insert clientIdentity [n] (pendingNotifications s)})
+    addNotification clientIdentity n = do
+      atomicMapIORef state (\s ->
+        case M.lookup clientIdentity . pendingNotifications $ s of
+          Just ns -> s { pendingNotifications = M.insert clientIdentity (n : ns) (pendingNotifications s)}
+          Nothing -> s { pendingNotifications = M.insert clientIdentity [n] (pendingNotifications s)})
+      sock <- bsNotificationsSocket <$> readIORef state
+      sendMulti sock (E.encodeUtf8 clientIdentity :| [BL.toStrict $ encode n])
 
 tradeSinkHandler :: Context -> IORef BrokerServerState -> [TradeSink] -> IO ()
 tradeSinkHandler c state tradeSinks = unless (null tradeSinks) $

@@ -44,10 +44,10 @@ unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
 -- Few helpers
 --
 
-makeEndpoint :: IO T.Text
-makeEndpoint = do
+makeEndpoints :: IO (T.Text, T.Text)
+makeEndpoints = do
   uid <- toText <$> UV4.nextRandom
-  return $ "inproc://brokerserver" `T.append` uid
+  return ("inproc://brokerserver-" `T.append` uid, "inproc://brokerserver-notifications-" `T.append` uid)
 
 connectAndSendOrder :: (Sender a) => (String -> IO ()) -> Socket a -> Order -> T.Text -> IO ()
 connectAndSendOrder step sock order ep = do
@@ -91,16 +91,16 @@ makeTestTradeSink = do
 
 testBrokerServerStartStop :: TestTree
 testBrokerServerStartStop = testCase "Broker Server starts and stops" $ withContext (\ctx -> do
-  ep <- toText <$> UV4.nextRandom
-  broS <- startBrokerServer [] ctx ("inproc://brokerserver" `T.append` ep) [] defaultServerSecurityParams
+  (ep, notifEp) <- makeEndpoints
+  broS <- startBrokerServer [] ctx ep notifEp [] defaultServerSecurityParams
   stopBrokerServer broS)
 
 testBrokerServerSubmitOrder :: TestTree
 testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \step -> withContext $ \ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
-  ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+  (ep, notifEp) <- makeEndpoints
+  bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
     withSocket ctx Req $ \sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
@@ -119,10 +119,10 @@ testBrokerServerSubmitOrderDifferentIdentities :: TestTree
 testBrokerServerSubmitOrderDifferentIdentities = testCaseSteps "Broker Server submits order: different identities" $ \step -> withContext $ \ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
-  ep <- makeEndpoint
+  (ep, notifEp) <- makeEndpoints
   let orderId1 = 42
   let orderId2 = 76
-  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+  bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
     withSocket ctx Req $ \sock1 -> do
       withSocket ctx Req $ \sock2 -> do
         connectAndSendOrderWithIdentity step sock1 defaultOrder {orderId = orderId1} "identity1" ep
@@ -150,9 +150,9 @@ testBrokerServerSubmitOrderToUnknownAccount :: TestTree
 testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server returns error if account is unknown" $
   \step -> withContext (\ctx -> do
     step "Setup"
-    ep <- makeEndpoint
+    (ep, notifEp) <- makeEndpoints
     (mockBroker, _) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\_ ->
+    bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer (\_ ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock (defaultOrder { orderAccountId = "foobar" }) ep
 
@@ -169,9 +169,9 @@ testBrokerServerCancelOrder :: TestTree
 testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order cancellation" $
   \step -> withContext $ \ctx -> do
     step "Setup"
-    ep <- makeEndpoint
+    (ep, notifEp) <- makeEndpoints
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+    bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
       withSocket ctx Req $ \sock -> do
         connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
@@ -196,9 +196,9 @@ testBrokerServerCancelUnknownOrder :: TestTree
 testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancellation: error if order is unknown" $
   \step -> withContext (\ctx -> do
     step "Setup"
-    ep <- makeEndpoint
+    (ep, notifEp) <- makeEndpoints
     (mockBroker, _) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\_ ->
+    bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer (\_ ->
       withSocket ctx Req (\sock -> do
         connectAndSendOrder step sock defaultOrder ep
         receive sock
@@ -219,9 +219,9 @@ testBrokerServerCorruptedPacket :: TestTree
 testBrokerServerCorruptedPacket = testCaseSteps "Broker Server: corrupted packet" $
   \step -> withContext (\ctx -> do
     step "Setup"
-    ep <- makeEndpoint
+    (ep, notifEp) <- makeEndpoints
     (mockBroker, _) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer (\_ ->
+    bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer (\_ ->
       withSocket ctx Req (\sock -> do
         step "Connecting"
         connect sock (T.unpack ep)
@@ -244,9 +244,9 @@ testBrokerServerGetNotifications :: TestTree
 testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications request" $
   \step -> withContext $ \ctx -> do
     step "Setup"
-    ep <- makeEndpoint
+    (ep, notifEp) <- makeEndpoints
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+    bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
       withSocket ctx Req $ \sock -> do
         -- We have to actually submit order, or else server won't know that we should
         -- be notified about this order
@@ -304,9 +304,9 @@ testBrokerServerGetNotificationsFromSameSqnum :: TestTree
 testBrokerServerGetNotificationsFromSameSqnum = testCaseSteps "Broker Server: notifications request, twice from same sqnum" $
   \step -> withContext $ \ctx -> do
     step "Setup"
-    ep <- makeEndpoint
+    (ep, notifEp) <- makeEndpoints
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+    bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
       withSocket ctx Req $ \sock -> do
         connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
@@ -363,9 +363,9 @@ testBrokerServerGetNotificationsRemovesEarlierNotifications :: TestTree
 testBrokerServerGetNotificationsRemovesEarlierNotifications = testCaseSteps "Broker Server: notifications request removes earlier notifications" $
   \step -> withContext $ \ctx -> do
     step "Setup"
-    ep <- makeEndpoint
+    (ep, notifEp) <- makeEndpoints
     (mockBroker, broState) <- mkMockBroker ["demo"]
-    bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
+    bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
       withSocket ctx Req $ \sock -> do
         connectAndSendOrder step sock defaultOrder ep
         (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
@@ -418,8 +418,8 @@ testBrokerServerDuplicateRequest :: TestTree
 testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate request" $ \step -> withContext $ \ctx -> do
   step "Setup"
   (mockBroker, broState) <- mkMockBroker ["demo"]
-  ep <- makeEndpoint
-  bracket (startBrokerServer [mockBroker] ctx ep [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+  (ep, notifEp) <- makeEndpoints
+  bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
     withSocket ctx Req $ \sock -> do
       connectAndSendOrder step sock defaultOrder ep
 
