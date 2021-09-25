@@ -118,33 +118,29 @@ instance ToJSON BrokerServerRequest where
     "request-notifications" .= ("" :: T.Text),
     "initial-sqnum" .= unNotificationSqnum initialNotificationSqnum]
 
-data BrokerServerResponse = ResponseOrderSubmitted OrderId
-  | ResponseOrderCancelled OrderId
+data BrokerServerResponse = ResponseOk
   | ResponseNotifications [Notification]
   | ResponseError T.Text
   deriving (Eq, Show)
 
 instance FromJSON BrokerServerResponse where
   parseJSON = withObject "object" (\obj ->
-    if | HM.member "order-id" obj -> do
-           oid <- obj .: "order-id"
-           return $ ResponseOrderSubmitted oid
-       | HM.member "order-cancelled" obj -> do
-           oid <- obj .: "order-cancelled"
-           return $ ResponseOrderCancelled oid
+    if | HM.member "result" obj -> do
+           result <- obj .: "result"
+           if (result :: T.Text) == "success"
+             then return ResponseOk
+             else do
+               msg <- obj .:? "message" .!= ""
+               return (ResponseError msg)
        | HM.member "notifications" obj -> do
            notifications <- obj .: "notifications"
            ResponseNotifications <$> parseJSON notifications
-       | HM.member "error" obj -> do
-           error <- obj .: "error"
-           ResponseError <$> parseJSON error
        | otherwise -> fail "Unable to parse BrokerServerResponse")
 
 instance ToJSON BrokerServerResponse where
-  toJSON (ResponseOrderSubmitted oid) = object [ "order-id" .= oid ]
-  toJSON (ResponseOrderCancelled oid) = object [ "order-cancelled" .= oid ]
+  toJSON ResponseOk = object [ "result" .= ("success" :: T.Text) ]
   toJSON (ResponseNotifications notifications) = object [ "notifications" .= notifications ]
-  toJSON (ResponseError errorMessage) = object [ "error" .= errorMessage ]
+  toJSON (ResponseError errorMessage) = object [ "result" .= ("error" :: T.Text), "message" .= errorMessage ]
 
 data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {
   tsAccountId     :: T.Text,

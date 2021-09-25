@@ -73,8 +73,8 @@ testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" 
       maybeOid <- submitOrder broC defaultOrder
       case maybeOid of
         Left err -> assertFailure "Invalid response"
-        Right oid -> do
-          rc <- cancelOrder broC oid
+        Right _ -> do
+          rc <- cancelOrder broC (orderId defaultOrder)
           case rc of
             Left err -> assertFailure "Invalid response"
             Right _  -> return()

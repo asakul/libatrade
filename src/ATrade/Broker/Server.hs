@@ -196,12 +196,12 @@ brokerServerThread state = finally brokerServerThread' cleanup
           case findBrokerForAccount (orderAccountId order) bros of
             Just bro -> do
               globalOrderId <- nextOrderId
-              let fullOrderId = (FullOrderId clientIdentity (orderId order))
+              let fullOrderId = FullOrderId clientIdentity (orderId order)
               atomicMapIORef state (\s -> s {
                 orderToBroker = M.insert fullOrderId bro (orderToBroker s),
                 orderMap = BM.insert fullOrderId globalOrderId (orderMap s) })
               submitOrder bro order { orderId = globalOrderId }
-              return $ ResponseOrderSubmitted (orderId order)
+              return ResponseOk
 
             Nothing -> do
               warningM "Broker.Server" $ "Unknown account: " ++ T.unpack (orderAccountId order)
@@ -213,7 +213,7 @@ brokerServerThread state = finally brokerServerThread' cleanup
           case (M.lookup fullOrderId m, BM.lookup fullOrderId bm) of
             (Just bro, Just globalOrderId) -> do
               cancelOrder bro globalOrderId
-              return $ ResponseOrderCancelled localOrderId
+              return ResponseOk
             _ -> return $ ResponseError "Unknown order"
         RequestNotifications sqnum clientIdentity initialSqnum -> do
           maybeNs <- M.lookup clientIdentity . pendingNotifications <$> readIORef state

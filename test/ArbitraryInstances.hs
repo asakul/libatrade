@@ -113,14 +113,15 @@ instance Arbitrary BrokerServerRequest where
     if | t == 1 -> RequestSubmitOrder <$> arbitrary <*> arbitrary <*> arbitrary
        | t == 2 -> RequestCancelOrder <$> arbitrary <*> arbitrary <*> arbitrary
        | t == 3 -> RequestNotifications <$> arbitrary <*> arbitrary <*> arbitrary
+       | otherwise -> error "Invalid argument"
 
 instance Arbitrary BrokerServerResponse where
   arbitrary = do
-    t <- choose (1, 4) :: Gen Int
-    if | t == 1 -> ResponseOrderSubmitted <$> arbitrary
-       | t == 2 -> ResponseOrderCancelled <$> arbitrary
-       | t == 3 -> ResponseNotifications <$> arbitrary
-       | t == 4 -> ResponseError <$> arbitrary
+    t <- choose (1, 3) :: Gen Int
+    if | t == 1 -> return ResponseOk
+       | t == 2 -> ResponseNotifications <$> arbitrary
+       | t == 3 -> ResponseError <$> arbitrary
+       | otherwise -> error "Invalid argument"
 
 instance Arbitrary P.Price where
   arbitrary = P.Price <$> (arbitrary `suchThat` (\p -> abs p < 1000000000 * 10000000))

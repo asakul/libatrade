@@ -35,7 +35,7 @@ data BrokerClientHandle = BrokerClientHandle {
   tid                   :: ThreadId,
   completionMvar        :: MVar (),
   killMvar              :: MVar (),
-  submitOrder           :: Order -> IO (Either T.Text OrderId),
+  submitOrder           :: Order -> IO (Either T.Text ()),
   cancelOrder           :: OrderId -> IO (Either T.Text ()),
   getNotifications      :: IO (Either T.Text [Notification]),
   cmdVar                :: MVar (BrokerServerRequest, MVar BrokerServerResponse),
@@ -108,16 +108,16 @@ stopBrokerClient handle = putMVar (killMvar handle) () >> yield >> killThread (t
 
 nextId cnt = atomicModifyIORef' cnt (\v -> (v + 1, v))
 
-bcSubmitOrder :: ClientIdentity -> IORef Int64 -> MVar (BrokerServerRequest, MVar BrokerServerResponse) -> Order -> IO (Either T.Text OrderId)
+bcSubmitOrder :: ClientIdentity -> IORef Int64 -> MVar (BrokerServerRequest, MVar BrokerServerResponse) -> Order -> IO (Either T.Text ())
 bcSubmitOrder clientIdentity idCounter cmdVar order = do
   respVar <- newEmptyMVar
   sqnum <- nextId idCounter
   putMVar cmdVar (RequestSubmitOrder sqnum clientIdentity order, respVar)
   resp <- takeMVar respVar
   case resp of
-    (ResponseOrderSubmitted oid) -> return $ Right oid
-    (ResponseError msg)          -> return $ Left msg
-    _                            -> return $ Left "Unknown error"
+    ResponseOk          -> return $ Right ()
+    (ResponseError msg) -> return $ Left msg
+    _                   -> return $ Left "Unknown error"
 
 bcCancelOrder :: ClientIdentity -> IORef RequestSqnum -> MVar (BrokerServerRequest, MVar BrokerServerResponse) -> OrderId -> IO (Either T.Text ())
 bcCancelOrder clientIdentity idCounter cmdVar orderId = do
@@ -126,9 +126,9 @@ bcCancelOrder clientIdentity idCounter cmdVar orderId = do
   putMVar cmdVar (RequestCancelOrder sqnum clientIdentity orderId, respVar)
   resp <- takeMVar respVar
   case resp of
-    (ResponseOrderCancelled oid) -> return $ Right ()
-    (ResponseError msg)          -> return $ Left msg
-    _                            -> return $ Left "Unknown error"
+    ResponseOk          -> return $ Right ()
+    (ResponseError msg) -> return $ Left msg
+    _                   -> return $ Left "Unknown error"
 
 bcGetNotifications :: ClientIdentity -> IORef RequestSqnum -> IORef NotificationSqnum -> MVar (BrokerServerRequest, MVar BrokerServerResponse) -> IO (Either T.Text [Notification])
 bcGetNotifications clientIdentity idCounter notifSqnumRef cmdVar = do

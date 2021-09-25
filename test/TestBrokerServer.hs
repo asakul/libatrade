@@ -115,9 +115,9 @@ testBrokerServerSubmitOrder = testCaseSteps "Broker Server submits order" $ \ste
       step "Reading response"
       resp <- decode . BL.fromStrict <$> receive sock
       case resp of
-        Just (ResponseOrderSubmitted _) -> return ()
-        Just _                          -> assertFailure "Invalid response"
-        Nothing                         -> assertFailure "Invalid response"
+        Just ResponseOk -> return ()
+        Just _          -> assertFailure "Invalid response"
+        Nothing         -> assertFailure "Invalid response"
 
 testBrokerServerSubmitOrderDifferentIdentities :: TestTree
 testBrokerServerSubmitOrderDifferentIdentities = testCaseSteps "Broker Server submits order: different identities" $ \step -> withContext $ \ctx -> do
@@ -139,16 +139,16 @@ testBrokerServerSubmitOrderDifferentIdentities = testCaseSteps "Broker Server su
         step "Reading response for identity1"
         resp <- decode . BL.fromStrict <$> receive sock1
         case resp of
-          Just (ResponseOrderSubmitted localOrderId) -> localOrderId @=? orderId1
-          Just _                          -> assertFailure "Invalid response"
-          Nothing                         -> assertFailure "Invalid response"
+          Just ResponseOk -> return ()
+          Just _          -> assertFailure "Invalid response"
+          Nothing         -> assertFailure "Invalid response"
 
         step "Reading response for identity2"
         resp <- decode . BL.fromStrict <$> receive sock2
         case resp of
-          Just (ResponseOrderSubmitted localOrderId) -> localOrderId @=? orderId2
-          Just _                          -> assertFailure "Invalid response"
-          Nothing                         -> assertFailure "Invalid response"
+          Just ResponseOk -> return ()
+          Just _          -> assertFailure "Invalid response"
+          Nothing         -> assertFailure "Invalid response"
 
 testBrokerServerSubmitOrderToUnknownAccount :: TestTree
 testBrokerServerSubmitOrderToUnknownAccount = testCaseSteps "Broker Server returns error if account is unknown" $
@@ -178,11 +178,10 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
     bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
       withSocket ctx Req $ \sock -> do
         connectAndSendOrder step sock defaultOrder ep
-        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
-        localOrderId @=? (orderId defaultOrder)
+        Just ResponseOk <- decode . BL.fromStrict <$> receive sock
 
         step "Sending order cancellation request"
-        send sock [] (BL.toStrict . encode $ RequestCancelOrder 2 "identity" localOrderId)
+        send sock [] (BL.toStrict . encode $ RequestCancelOrder 2 "identity" (orderId defaultOrder))
         threadDelay 10000
 
         step "Checking that order is cancelled in BrokerBackend"
@@ -192,9 +191,9 @@ testBrokerServerCancelOrder = testCaseSteps "Broker Server: submitted order canc
         step "Reading response"
         resp <- decode . BL.fromStrict <$> receive sock
         case resp of
-          Just (ResponseOrderCancelled _) -> return ()
-          Just _                          -> assertFailure "Invalid response"
-          Nothing                         -> assertFailure "Invalid response"
+          Just ResponseOk -> return ()
+          Just _          -> assertFailure "Invalid response"
+          Nothing         -> assertFailure "Invalid response"
 
 testBrokerServerCancelUnknownOrder :: TestTree
 testBrokerServerCancelUnknownOrder = testCaseSteps "Broker Server: order cancellation: error if order is unknown" $
@@ -255,8 +254,7 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
         -- We have to actually submit order, or else server won't know that we should
         -- be notified about this order
         connectAndSendOrder step sock defaultOrder ep
-        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
-        localOrderId @=? orderId defaultOrder
+        Just ResponseOk <- decode . BL.fromStrict <$> receive sock
         threadDelay 10000
 
         globalOrderId <- orderId . head . orders <$> readIORef broState
@@ -292,9 +290,8 @@ testBrokerServerGetNotifications = testCaseSteps "Broker Server: notifications r
             length ns @=? 3
             let (OrderNotification orderNotificationSqnum oid newstate) = ns !! 1
             let (TradeNotification tradeNotificationSqnum newtrade) = ns !! 2
-            localOrderId @=? oid
             Executed @=? newstate
-            trade { tradeOrderId = localOrderId } @=? newtrade
+            trade { tradeOrderId = orderId defaultOrder } @=? newtrade
             -- Check notification sqnums
             step "Received notification sqnums are correct"
             let sqnums = sort $ fmap (unNotificationSqnum . getNotificationSqnum) ns
@@ -313,8 +310,7 @@ testBrokerServerGetNotificationsFromSameSqnum = testCaseSteps "Broker Server: no
     bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
       withSocket ctx Req $ \sock -> do
         connectAndSendOrder step sock defaultOrder ep
-        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
-        localOrderId @=? orderId defaultOrder
+        Just ResponseOk <- decode . BL.fromStrict <$> receive sock
         threadDelay 10000
 
         globalOrderId <- orderId . head . orders <$> readIORef broState
@@ -372,8 +368,7 @@ testBrokerServerGetNotificationsRemovesEarlierNotifications = testCaseSteps "Bro
     bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ ->
       withSocket ctx Req $ \sock -> do
         connectAndSendOrder step sock defaultOrder ep
-        (Just (ResponseOrderSubmitted localOrderId)) <- decode . BL.fromStrict <$> receive sock
-        localOrderId @=? orderId defaultOrder
+        Just ResponseOk <- decode . BL.fromStrict <$> receive sock
         threadDelay 10000
 
         globalOrderId <- orderId . head . orders <$> readIORef broState
@@ -428,7 +423,7 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
       connectAndSendOrder step sock defaultOrder ep
 
       step "Reading response"
-      (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+      Just ResponseOk <- decode . BL.fromStrict <$> receive sock
 
       step "Sending duplicate request (with same sequence number)"
       send sock [] (BL.toStrict . encode $ RequestSubmitOrder 1 "identity" defaultOrder)
@@ -441,9 +436,9 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
       step "Reading response from duplicate request"
       resp <- decode . BL.fromStrict <$> receive sock
       case resp of
-        Just (ResponseOrderSubmitted oid) -> orderId @?= oid
-        Just _                            -> assertFailure "Invalid response"
-        Nothing                           -> assertFailure "Invalid response"
+        Just ResponseOk -> return ()
+        Just _          -> assertFailure "Invalid response"
+        Nothing         -> assertFailure "Invalid response"
 
 testBrokerServerNotificationSocket :: TestTree
 testBrokerServerNotificationSocket = testCaseSteps "Broker Server: sends notification via notification socket" $ \step -> withContext $ \ctx -> do
@@ -459,13 +454,13 @@ testBrokerServerNotificationSocket = testCaseSteps "Broker Server: sends notific
       connectAndSendOrderWithIdentity step sock defaultOrder "test-identity" ep
 
       step "Reading response"
-      (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+      Just ResponseOk <- decode . BL.fromStrict <$> receive sock
 
       step "Reading order submitted notification"
 
       [_, payload] <- receiveMulti nSocket
       let (Just (OrderNotification notifSqnum1 notifOid newOrderState)) = decode . BL.fromStrict $ payload
-      notifOid @?= orderId
+      notifOid @?= orderId defaultOrder
       newOrderState @?= Submitted
 
       backendOrderId <- mockBrokerLastOrderId broState
@@ -489,7 +484,7 @@ testBrokerServerNotificationSocket = testCaseSteps "Broker Server: sends notific
       step "Receiving trade notification"
       [_, payload] <- receiveMulti nSocket
       let (Just (TradeNotification notifSqnum2 incomingTrade)) = decode . BL.fromStrict $ payload
-      incomingTrade @?= trade { tradeOrderId = orderId }
+      incomingTrade @?= trade { tradeOrderId = orderId defaultOrder }
 
 {-
 testBrokerServerTradeSink :: TestTree
