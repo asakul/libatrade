@@ -55,21 +55,36 @@ defaultOrder = mkOrder {
     orderOperation = Buy
   }
 
+makeNotificationCallback :: IO (IORef [Notification], NotificationCallback)
+makeNotificationCallback = do
+  ref <- newIORef []
+  return (ref, \n -> atomicModifyIORef' ref (\s -> (n : s, ())))
+
 testBrokerClientStartStop = testCase "Broker client: submit order" $ withContext (\ctx -> do
   (ep, notifEp) <- makeEndpoints
+  (ref, callback) <- makeNotificationCallback
   (mockBroker, broState) <- mkMockBroker ["demo"]
   bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer (\broS ->
-    bracket (startBrokerClient "foo" ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
-      oid <- submitOrder broC defaultOrder
-      case oid of
+    bracket (startBrokerClient "foo" ctx ep notifEp [callback] defaultClientSecurityParams) stopBrokerClient (\broC -> do
+      result <- submitOrder broC defaultOrder
+      case result of
         Left err -> assertFailure "Invalid response"
-        Right _  -> return ())))
+        Right _  -> do
+          threadDelay 10000 -- Wait for callback
+          notifs <- readIORef ref
+          case head notifs of
+            OrderNotification _ oid newState -> do
+              newState @=? Submitted
+              oid @=? orderId defaultOrder
+            _ -> assertFailure "Invalid notification"
+          )))
 
 testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" $ withContext (\ctx -> do
   (ep, notifEp) <- makeEndpoints
+  (ref, callback) <- makeNotificationCallback
   (mockBroker, broState) <- mkMockBroker ["demo"]
   bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer (\broS ->
-    bracket (startBrokerClient "foo" ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
+    bracket (startBrokerClient "foo" ctx ep notifEp [callback] defaultClientSecurityParams) stopBrokerClient (\broC -> do
       maybeOid <- submitOrder broC defaultOrder
       case maybeOid of
         Left err -> assertFailure "Invalid response"
@@ -82,9 +97,10 @@ testBrokerClientCancelOrder = testCase "Broker client: submit and cancel order" 
 
 testBrokerClientGetNotifications = testCase "Broker client: get notifications" $ withContext (\ctx -> do
   (ep, notifEp) <- makeEndpoints
+  (ref, callback) <- makeNotificationCallback
   (mockBroker, broState) <- mkMockBroker ["demo"]
   bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer (\broS ->
-    bracket (startBrokerClient "foo" ctx ep defaultClientSecurityParams) stopBrokerClient (\broC -> do
+    bracket (startBrokerClient "foo" ctx ep notifEp [callback] defaultClientSecurityParams) stopBrokerClient (\broC -> do
       maybeOid <- submitOrder broC defaultOrder
       case maybeOid of
         Left err -> assertFailure "Invalid response"

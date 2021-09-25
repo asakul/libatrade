@@ -39,7 +39,12 @@ mockCancelOrder :: IORef MockBrokerState -> OrderId -> IO ()
 mockCancelOrder state oid = do
   ors <- orders <$> readIORef state
   case L.find (\o -> orderId o == oid) ors of
-    Just order -> atomicModifyIORef' state (\s -> (s { cancelledOrders = order : cancelledOrders s}, ()))
+    Just order -> do
+      atomicModifyIORef' state (\s -> (s { cancelledOrders = order : cancelledOrders s}, ()))
+      maybeCb <- notificationCallback <$> readIORef state
+      case maybeCb of
+        Just cb -> cb $ BackendOrderNotification (orderId order) Cancelled
+        Nothing -> return ()
     Nothing -> return ()
 
 mockStopBroker :: IORef MockBrokerState -> IO ()
