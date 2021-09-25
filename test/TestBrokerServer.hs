@@ -20,11 +20,14 @@ import qualified Data.ByteString.Lazy   as BL
 import           Data.IORef
 import           Data.List              (sort)
 import qualified Data.Text              as T
+import           Data.Text.Encoding     (encodeUtf8)
 import           Data.Time.Calendar
 import           Data.Time.Clock
 import           Data.UUID              as U
 import           Data.UUID.V4           as UV4
+import           Debug.Trace            (traceM)
 import           MockBroker
+import           System.Log.Logger
 import           System.ZMQ4
 
 unitTests :: TestTree
@@ -38,7 +41,8 @@ unitTests = testGroup "Broker.Server" [testBrokerServerStartStop
   , testBrokerServerGetNotifications
   , testBrokerServerGetNotificationsFromSameSqnum
   , testBrokerServerGetNotificationsRemovesEarlierNotifications
-  , testBrokerServerDuplicateRequest ]
+  , testBrokerServerDuplicateRequest
+  , testBrokerServerNotificationSocket ]
 
 --
 -- Few helpers
@@ -440,6 +444,52 @@ testBrokerServerDuplicateRequest = testCaseSteps "Broker Server: duplicate reque
         Just (ResponseOrderSubmitted oid) -> orderId @?= oid
         Just _                            -> assertFailure "Invalid response"
         Nothing                           -> assertFailure "Invalid response"
+
+testBrokerServerNotificationSocket :: TestTree
+testBrokerServerNotificationSocket = testCaseSteps "Broker Server: sends notification via notification socket" $ \step -> withContext $ \ctx -> do
+  (mockBroker, broState) <- mkMockBroker ["demo"]
+
+  (ep, notifEp) <- makeEndpoints
+  bracket (startBrokerServer [mockBroker] ctx ep notifEp [] defaultServerSecurityParams) stopBrokerServer $ \_ -> do
+    withSocket ctx Req $ \sock -> do
+      nSocket <- socket ctx Sub
+      connect nSocket (T.unpack notifEp)
+      subscribe nSocket (encodeUtf8 "test-identity")
+
+      connectAndSendOrderWithIdentity step sock defaultOrder "test-identity" ep
+
+      step "Reading response"
+      (Just (ResponseOrderSubmitted orderId)) <- decode . BL.fromStrict <$> receive sock
+
+      step "Reading order submitted notification"
+
+      [_, payload] <- receiveMulti nSocket
+      let (Just (OrderNotification notifSqnum1 notifOid newOrderState)) = decode . BL.fromStrict $ payload
+      notifOid @?= orderId
+      newOrderState @?= Submitted
+
+      backendOrderId <- mockBrokerLastOrderId broState
+      let trade = Trade
+                    {
+                      tradeOrderId = backendOrderId,
+                      tradePrice = 10,
+                      tradeQuantity = 1,
+                      tradeVolume = 1,
+                      tradeVolumeCurrency = "TEST",
+                      tradeOperation = Buy ,
+                      tradeAccount = "TEST_ACCOUNT",
+                      tradeSecurity = "TEST_SECURITY",
+                      tradeTimestamp = UTCTime (fromGregorian 2021 09 24) 10000,
+                      tradeCommission = 3.5,
+                      tradeSignalId = SignalId "test" "test" ""
+                    }
+      step "Emitting trade notification"
+      emitNotification broState (BackendTradeNotification trade)
+
+      step "Receiving trade notification"
+      [_, payload] <- receiveMulti nSocket
+      let (Just (TradeNotification notifSqnum2 incomingTrade)) = decode . BL.fromStrict $ payload
+      incomingTrade @?= trade { tradeOrderId = orderId }
 
 {-
 testBrokerServerTradeSink :: TestTree
