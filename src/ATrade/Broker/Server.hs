@@ -77,6 +77,11 @@ startBrokerServer brokers c ep notificationsEp tradeSinks params = do
       zapApplyCertificate cert notificationsSock
     Nothing -> return ()
   bind sock (T.unpack ep)
+
+  setTcpKeepAlive On notificationsSock
+  setTcpKeepAliveCount (restrict 5) notificationsSock
+  setTcpKeepAliveIdle (restrict 60) notificationsSock
+  setTcpKeepAliveInterval (restrict 10) notificationsSock
   bind notificationsSock (T.unpack notificationsEp)
   tid <- myThreadId
   compMv <- newEmptyMVar
@@ -121,6 +126,7 @@ notificationCallback state n = do
 
   where
     addNotification clientIdentity n = do
+      debugM "Broker.Server" $ "Sending notification to client [" <> T.unpack clientIdentity <> "]"
       atomicMapIORef state (\s ->
         case M.lookup clientIdentity . pendingNotifications $ s of
           Just ns -> s { pendingNotifications = M.insert clientIdentity (n : ns) (pendingNotifications s)}
