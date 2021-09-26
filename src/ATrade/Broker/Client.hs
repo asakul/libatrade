@@ -99,6 +99,7 @@ notificationThread clientIdentity callbacks ctx ep killMv = flip finally (return
       setTcpKeepAliveIdle (restrict 60) sock
       setTcpKeepAliveInterval (restrict 10) sock
       connect sock $ T.unpack ep
+      debugM "Broker.Client" $ "Subscribing: [" <> T.unpack clientIdentity <> "]"
       subscribe sock $ T.encodeUtf8 clientIdentity
       whileM_ (isNothing <$> tryReadMVar killMv) $ do
         msg <- receiveMulti sock
@@ -109,7 +110,13 @@ notificationThread clientIdentity callbacks ctx ep killMv = flip finally (return
           _ -> return ()
 
 
-startBrokerClient :: B.ByteString -> Context -> T.Text -> T.Text -> [NotificationCallback] -> ClientSecurityParams -> IO BrokerClientHandle
+startBrokerClient :: B.ByteString -- ^ Socket Identity
+  -> Context -- ^ ZeroMQ context
+  -> T.Text -- ^ Broker endpoing
+  -> T.Text -- ^ Notification endpoing
+  -> [NotificationCallback] -- ^ List of notification callbacks
+  -> ClientSecurityParams -- ^
+  -> IO BrokerClientHandle
 startBrokerClient socketIdentity ctx endpoint notifEndpoint notificationCallbacks secParams = do
   idCounter <- newIORef 1
   compMv <- newEmptyMVar
