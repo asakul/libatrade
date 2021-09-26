@@ -28,6 +28,7 @@ import           Data.Maybe
 import qualified Data.Text                      as T
 import           Data.Text.Encoding
 import qualified Data.Text.Encoding             as T
+import           Safe
 import           System.Log.Logger
 import           System.Timeout
 import           System.ZMQ4
@@ -189,6 +190,10 @@ bcGetNotifications clientIdentity idCounter notifSqnumRef cmdVar = do
   putMVar cmdVar (RequestNotifications sqnum clientIdentity notifSqnum, respVar)
   resp <- takeMVar respVar
   case resp of
-    (ResponseNotifications ns) -> return $ Right ns
+    (ResponseNotifications ns) -> do
+      case lastMay ns of
+        Just n  -> atomicWriteIORef notifSqnumRef (getNotificationSqnum n)
+        Nothing -> return ()
+      return $ Right ns
     (ResponseError msg)        -> return $ Left msg
     _                          -> return $ Left "Unknown error"
