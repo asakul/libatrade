@@ -91,13 +91,11 @@ brokerClientThread socketIdentity ctx ep cmd comp killMv secParams = finally bro
     isZMQError e = "ZMQError" `L.isPrefixOf` show e
 
 
-notificationThread :: ClientIdentity -> [NotificationCallback] -> Context -> T.Text -> MVar () -> ClientSecurityParams -> IO ()
-notificationThread clientIdentity callbacks ctx ep killMv secParams = flip finally (return ()) $ do
+notificationThread :: ClientIdentity -> [NotificationCallback] -> Context -> T.Text -> IORef RequestSqnum -> MVar (BrokerServerRequest, MVar BrokerServerResponse) -> MVar () -> ClientSecurityParams -> IO ()
+notificationThread clientIdentity callbacks ctx ep idCounter cmdVar killMv secParams = flip finally (return ()) $ do
   whileM_ (isNothing <$> tryReadMVar killMv) $
     withSocket ctx Sub $ \sock -> do
-
       setLinger (restrict 0) sock
-
       case cspCertificate secParams of
         Just clientCert -> zapApplyCertificate clientCert sock
         Nothing         -> return ()
@@ -111,13 +109,57 @@ notificationThread clientIdentity callbacks ctx ep killMv secParams = flip final
       connect sock $ T.unpack ep
       debugM "Broker.Client" $ "Subscribing: [" <> T.unpack clientIdentity <> "]"
       subscribe sock $ T.encodeUtf8 clientIdentity
+
+      initialSqnum <- requestCurrentSqnum cmdVar idCounter clientIdentity
+
+      notifSqnumRef <- newIORef initialSqnum
       whileM_ (isNothing <$> tryReadMVar killMv) $ do
-        msg <- receiveMulti sock
-        case msg of
-          [_, payload] -> case decode (BL.fromStrict payload) of
-            Just notification -> forM_ callbacks $ \c -> c notification
-            _                 -> return ()
-          _ -> return ()
+        evs <- poll 5000 [Sock sock [In] Nothing]
+        if null . L.head $ evs
+          then do
+            respVar <- newEmptyMVar
+            sqnum <- nextId idCounter
+            notifSqnum <- readIORef notifSqnumRef
+            putMVar cmdVar (RequestNotifications sqnum clientIdentity notifSqnum, respVar)
+            resp <- takeMVar respVar
+            case resp of
+              (ResponseNotifications ns) -> do
+                case lastMay ns of
+                  Just n  -> atomicWriteIORef notifSqnumRef (nextSqnum $ getNotificationSqnum n)
+                  Nothing -> return ()
+                return ()
+              (ResponseError msg)        -> warningM "Broker.Client" $ "ResponseError: " <> T.unpack msg
+              _                          -> warningM "Broker.Client" $ "Unknown error when requesting notifications"
+          else do
+            msg <- receiveMulti sock
+            case msg of
+              [_, payload] -> case decode (BL.fromStrict payload) of
+                Just notification -> do
+                  currentSqnum <- readIORef notifSqnumRef
+                  if getNotificationSqnum notification /= currentSqnum
+                    then
+                      if currentSqnum > getNotificationSqnum notification
+                        then debugM "Broker.Client" $ "Already processed notification: " <> show (getNotificationSqnum notification)
+                        else warningM "Broker.Client" $ "Notification sqnum mismatch: " <> show currentSqnum <> " -> " <> show (getNotificationSqnum notification)
+                    else do
+                      atomicWriteIORef notifSqnumRef (nextSqnum currentSqnum)
+                      forM_ callbacks $ \c -> c notification
+                _                 -> return ()
+              _ -> return ()
+  where
+    requestCurrentSqnum cmdVar idCounter clientIdentity = do
+      respVar <- newEmptyMVar
+      sqnum <- nextId idCounter
+      putMVar cmdVar (RequestCurrentSqnum sqnum clientIdentity, respVar)
+      resp <- takeMVar respVar
+      case resp of
+        (ResponseCurrentSqnum sqnum) -> return sqnum
+        (ResponseError msg)        -> do
+          warningM "Broker.Client" $ "ResponseError: " <> T.unpack msg
+          return (NotificationSqnum 1)
+        _                          -> do
+          warningM "Broker.Client" "Unknown error when requesting notifications"
+          return (NotificationSqnum 1)
 
 
 startBrokerClient :: B.ByteString -- ^ Socket Identity
@@ -134,7 +176,7 @@ startBrokerClient socketIdentity ctx endpoint notifEndpoint notificationCallback
   cmdVar <- newEmptyMVar :: IO (MVar (BrokerServerRequest, MVar BrokerServerResponse))
   tid <- forkIO (brokerClientThread socketIdentity ctx endpoint cmdVar compMv killMv secParams)
   notifSqnumRef <- newIORef (NotificationSqnum 0)
-  notifThreadId <- forkIO (notificationThread (T.decodeUtf8 socketIdentity) notificationCallbacks ctx notifEndpoint killMv secParams)
+  notifThreadId <- forkIO (notificationThread (T.decodeUtf8 socketIdentity) notificationCallbacks ctx notifEndpoint idCounter cmdVar killMv secParams)
 
   return BrokerClientHandle {
     tid = tid,

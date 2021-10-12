@@ -80,12 +80,14 @@ instance ToJSON Notification where
 data BrokerServerRequest = RequestSubmitOrder RequestSqnum ClientIdentity Order
   | RequestCancelOrder RequestSqnum ClientIdentity OrderId
   | RequestNotifications RequestSqnum ClientIdentity NotificationSqnum
+  | RequestCurrentSqnum RequestSqnum ClientIdentity
   deriving (Eq, Show)
 
 requestSqnum :: BrokerServerRequest -> RequestSqnum
 requestSqnum (RequestSubmitOrder sqnum _ _)   = sqnum
 requestSqnum (RequestCancelOrder sqnum _ _)   = sqnum
 requestSqnum (RequestNotifications sqnum _ _) = sqnum
+requestSqnum (RequestCurrentSqnum sqnum _)    = sqnum
 
 instance FromJSON BrokerServerRequest where
   parseJSON = withObject "object" (\obj -> do
@@ -104,6 +106,8 @@ instance FromJSON BrokerServerRequest where
         | HM.member "request-notifications" obj = do
             initialSqnum <- obj .: "initial-sqnum"
             return (RequestNotifications sqnum clientIdentity (NotificationSqnum initialSqnum))
+        | HM.member "request-current-sqnum" obj =
+            return (RequestCurrentSqnum sqnum clientIdentity)
       parseRequest _ _ _ = fail "Invalid request object"
 
 instance ToJSON BrokerServerRequest where
@@ -117,9 +121,14 @@ instance ToJSON BrokerServerRequest where
     "client-identity" .= clientIdentity,
     "request-notifications" .= ("" :: T.Text),
     "initial-sqnum" .= unNotificationSqnum initialNotificationSqnum]
+  toJSON (RequestCurrentSqnum sqnum clientIdentity) = object
+    ["request-sqnum" .= sqnum,
+     "client-identity" .= clientIdentity,
+     "request-current-sqnum" .= ("" :: T.Text) ]
 
 data BrokerServerResponse = ResponseOk
   | ResponseNotifications [Notification]
+  | ResponseCurrentSqnum NotificationSqnum
   | ResponseError T.Text
   deriving (Eq, Show)
 
@@ -135,11 +144,15 @@ instance FromJSON BrokerServerResponse where
        | HM.member "notifications" obj -> do
            notifications <- obj .: "notifications"
            ResponseNotifications <$> parseJSON notifications
+       | HM.member "current-sqnum" obj -> do
+           rawSqnum <- obj .: "current-sqnum"
+           return $ ResponseCurrentSqnum (NotificationSqnum rawSqnum)
        | otherwise -> fail "Unable to parse BrokerServerResponse")
 
 instance ToJSON BrokerServerResponse where
   toJSON ResponseOk = object [ "result" .= ("success" :: T.Text) ]
   toJSON (ResponseNotifications notifications) = object [ "notifications" .= notifications ]
+  toJSON (ResponseCurrentSqnum sqnum) = object [ "current-sqnum" .= unNotificationSqnum sqnum ]
   toJSON (ResponseError errorMessage) = object [ "result" .= ("error" :: T.Text), "message" .= errorMessage ]
 
 data TradeSinkMessage = TradeSinkHeartBeat | TradeSinkTrade {

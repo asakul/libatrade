@@ -28,6 +28,7 @@ import           Data.Maybe
 import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as E
 import           Data.Time.Clock
+import           Safe                           (lastMay)
 import           System.Log.Logger
 import           System.Timeout
 import           System.ZMQ4
@@ -156,8 +157,8 @@ brokerServerThread state = finally brokerServerThread' cleanup
         msg <- receiveMulti sock
         case msg of
           [peerId, _, payload] ->
-            case decode . BL.fromStrict $ payload of
-              Just request -> do
+            case eitherDecode . BL.fromStrict $ payload of
+              Right request -> do
                 let sqnum = requestSqnum request
                 -- Here, we should check if previous packet sequence number is the same
                 -- If it is, we should resend previous response
@@ -173,10 +174,10 @@ brokerServerThread state = finally brokerServerThread' cleanup
                     sendMessage sock peerId response
                     -- and store response in case we'll need to resend it
                     atomicMapIORef state (\s -> s { lastPacket = M.insert peerId (sqnum, response) (lastPacket s)})
-              Nothing -> do
+              Left errmsg -> do
                 -- If we weren't able to parse request, we should send error
                 -- but shouldn't update lastPacket
-                let response = ResponseError "Invalid request"
+                let response = ResponseError $ "Invalid request: " <> T.pack errmsg
                 sendMessage sock peerId response
           _ -> warningM "Broker.Server" ("Invalid packet received: " ++ show msg)
 
@@ -229,6 +230,19 @@ brokerServerThread state = finally brokerServerThread' cleanup
               atomicMapIORef state (\s -> s { pendingNotifications = M.insert clientIdentity filtered (pendingNotifications s)})
               return $ ResponseNotifications . L.reverse $ filtered
             Nothing -> return $ ResponseNotifications []
+        RequestCurrentSqnum sqnum clientIdentity -> do
+          sqnumMap <- notificationSqnum <$> readIORef state
+          notifMap <- pendingNotifications <$> readIORef state
+          case M.lookup clientIdentity notifMap of
+            Just [] ->
+              case M.lookup clientIdentity sqnumMap of
+                Just sqnum -> return (ResponseCurrentSqnum sqnum)
+                _          -> return (ResponseCurrentSqnum (NotificationSqnum 1))
+            Just notifs -> case lastMay notifs of
+              Just v -> return (ResponseCurrentSqnum (getNotificationSqnum v))
+              _ -> return (ResponseCurrentSqnum (NotificationSqnum 1))
+            Nothing -> return (ResponseCurrentSqnum (NotificationSqnum 1))
+
 
     sendMessage sock peerId resp = sendMulti sock (peerId :| [B.empty, BL.toStrict . encode $ resp])
 
