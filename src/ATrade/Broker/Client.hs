@@ -124,12 +124,13 @@ notificationThread clientIdentity callbacks ctx ep idCounter cmdVar killMv secPa
             resp <- takeMVar respVar
             case resp of
               (ResponseNotifications ns) -> do
-                case lastMay ns of
-                  Just n  -> atomicWriteIORef notifSqnumRef (nextSqnum $ getNotificationSqnum n)
-                  Nothing -> return ()
-                return ()
+                forM_ ns $ \notif -> do
+                  lastSqnum <- readIORef notifSqnumRef
+                  when (getNotificationSqnum notif >= lastSqnum) $ do
+                    forM_ callbacks $ \c -> c notif
+                    atomicWriteIORef notifSqnumRef (nextSqnum lastSqnum)
               (ResponseError msg)        -> warningM "Broker.Client" $ "ResponseError: " <> T.unpack msg
-              _                          -> warningM "Broker.Client" $ "Unknown error when requesting notifications"
+              _                          -> warningM "Broker.Client" "Unknown error when requesting notifications"
           else do
             msg <- receiveMulti sock
             case msg of
