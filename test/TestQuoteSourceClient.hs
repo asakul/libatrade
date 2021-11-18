@@ -31,7 +31,8 @@ unitTests :: TestTree
 unitTests = testGroup "QuoteSource.Client" [
     testStartStop
   , testTickStream
-  , testBarStream ]
+  , testBarStream
+  , testDynamicSubscription ]
 
 testStartStop :: TestTree
 testStartStop = testCase "QuoteSource client connects and disconnects" $ withContext (\ctx -> do
@@ -46,7 +47,8 @@ testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\c
   ep <- makeEndpoint
   chan <- newBoundedChan 1000
   clientChan <- newBoundedChan 1000
-  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
+  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ -> do
+    threadDelay 20000
     bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\_ -> do
       let tick = Tick {
           security = "FOOBAR",
@@ -63,7 +65,8 @@ testBarStream = testCase "QuoteSource clients receives bars" $ withContext (\ctx
   ep <- makeEndpoint
   chan <- newBoundedChan 1000
   clientChan <- newBoundedChan 1000
-  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
+  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ -> do
+    threadDelay 20000
     bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\_ -> do
       let bar = Bar {
           barSecurity = "FOOBAR",
@@ -73,6 +76,27 @@ testBarStream = testCase "QuoteSource clients receives bars" $ withContext (\ctx
           barLow = fromDouble 8.0,
           barClose = fromDouble 11.0,
           barVolume = 42 }
+      forkIO $ forever $ writeChan chan $ QSSBar (BarTimeframe 60, bar)
+      recvdData <- readChan clientChan
+      QDBar (BarTimeframe 60, bar) @=? recvdData)))
+
+testDynamicSubscription :: TestTree
+testDynamicSubscription = testCase "QuoteSource clients can subscribe dynamically" $ withContext (\ctx -> do
+  ep <- makeEndpoint
+  chan <- newBoundedChan 1000
+  clientChan <- newBoundedChan 1000
+  bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
+    bracket (startQuoteSourceClient clientChan [] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\client -> do
+      quoteSourceClientSubscribe client [("FOOBAR", BarTimeframe 60)]
+      let bar = Bar {
+          barSecurity = "FOOBAR",
+          barTimestamp = UTCTime (fromGregorian 2021 11 18) 16000,
+          barOpen = fromDouble 10.0,
+          barHigh = fromDouble 15.0,
+          barLow = fromDouble 8.0,
+          barClose = fromDouble 11.0,
+          barVolume = 42 }
+      threadDelay 200000
       forkIO $ forever $ writeChan chan $ QSSBar (BarTimeframe 60, bar)
       recvdData <- readChan clientChan
       QDBar (BarTimeframe 60, bar) @=? recvdData)))
