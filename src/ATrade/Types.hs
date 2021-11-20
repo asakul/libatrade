@@ -177,7 +177,7 @@ data Bar = Bar {
 
 -- | Stores timeframe in seconds
 newtype BarTimeframe = BarTimeframe { unBarTimeframe :: Int }
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 serializeBar :: BarTimeframe -> Bar -> [ByteString]
 serializeBar tf bar = serializeBarHeader tf bar : [serializeBarBody tf bar]
