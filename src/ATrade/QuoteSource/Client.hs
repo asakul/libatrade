@@ -3,6 +3,7 @@
 {-# LANGUAGE TupleSections     #-}
 
 module ATrade.QuoteSource.Client (
+  QuoteSourceClientHandle,
   QuoteData(..),
   startQuoteSourceClient,
   stopQuoteSourceClient,
