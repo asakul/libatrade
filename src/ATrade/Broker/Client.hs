@@ -3,6 +3,7 @@
 module ATrade.Broker.Client (
   startBrokerClient,
   stopBrokerClient,
+  BrokerClientHandle,
   submitOrder,
   cancelOrder,
   getNotifications,
