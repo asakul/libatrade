@@ -28,7 +28,7 @@ import           Colog                    (LogAction (unLogAction), WithLog,
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import qualified Data.Text                as T
 import           Data.Time                (UTCTime, defaultTimeLocale,
-                                           getCurrentTime)
+                                           formatTime, getCurrentTime)
 import           Data.Time.Format.ISO8601 (iso8601Show)
 import           Prelude                  hiding (log)
 import           System.Console.ANSI      (Color (Cyan, Green, Red, White, Yellow),
@@ -56,9 +56,9 @@ data Message =
 
 fmtMessage :: Message -> T.Text
 fmtMessage Message{..} =
-  (bracketed . T.pack . iso8601Show) msgTimestamp <>
-  bracketed msgComponent <>
+  (bracketed . T.pack . formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S") msgTimestamp <>
   showSeverity msgSeverity <>
+  bracketed msgComponent <>
   " " <>
   msgText
   where
@@ -66,11 +66,11 @@ fmtMessage Message{..} =
 
 showSeverity :: Severity -> T.Text
 showSeverity = \case
-  Trace -> color White Dull "[Trace]  "
-  Debug -> color Cyan Dull "[Debug]  "
-  Info -> color Green Vivid "[Info]   "
+  Trace -> color White Dull "[Trace  ]"
+  Debug -> color Green Dull "[Debug  ]"
+  Info -> color Green Vivid "[Info   ]"
   Warning -> color Yellow Vivid "[Warning]"
-  Error -> color Red Vivid "[Error]  "
+  Error -> color Red Vivid "[Error  ]"
   where
     color c h txt = T.pack (setSGRCode [SetColor Foreground h c])
         <> txt
