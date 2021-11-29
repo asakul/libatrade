@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-17.14
+resolver: lts-18.18
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -40,7 +40,11 @@ packages:
 - '../zeromq4-haskell-zap'
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-extra-deps: [ "datetime-0.3.1", "hexdump-0.1"]
+extra-deps:
+- datetime-0.3.1
+- hexdump-0.1
+- co-log-0.4.0.1@sha256:3d4c17f37693c80d1aa2c41669bc3438fac3e89dc5f479e57d79bc3ddc4dfcc5,5087
+- ansi-terminal-0.10.3@sha256:e2fbcef5f980dc234c7ad8e2fa433b0e8109132c9e643bc40ea5608cd5697797,3226
 
 # Override default flag values for local packages and extra-deps
 flags: {}
