@@ -7,6 +7,7 @@ module TestQuoteSourceClient (
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
+import           ATrade.Logging                 (emptyLogger)
 import           ATrade.QuoteSource.Client
 import           ATrade.QuoteSource.Server
 import           ATrade.Types
@@ -40,7 +41,7 @@ testStartStop = testCase "QuoteSource client connects and disconnects" $ withCon
   chan <- newBoundedChan 1000
   clientChan <- newBoundedChan 1000
   bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
-    bracket (startQuoteSourceClient clientChan [] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (const yield)))
+    bracket (startQuoteSourceClient clientChan [] ctx ep defaultClientSecurityParams emptyLogger) stopQuoteSourceClient (const yield)))
 
 testTickStream :: TestTree
 testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\ctx -> do
@@ -49,7 +50,7 @@ testTickStream = testCase "QuoteSource clients receives ticks" $ withContext (\c
   clientChan <- newBoundedChan 1000
   bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ -> do
     threadDelay 20000
-    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\_ -> do
+    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams emptyLogger) stopQuoteSourceClient (\_ -> do
       let tick = Tick {
           security = "FOOBAR",
           datatype = LastTradePrice,
@@ -67,7 +68,7 @@ testBarStream = testCase "QuoteSource clients receives bars" $ withContext (\ctx
   clientChan <- newBoundedChan 1000
   bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ -> do
     threadDelay 20000
-    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\_ -> do
+    bracket (startQuoteSourceClient clientChan ["FOOBAR"] ctx ep defaultClientSecurityParams emptyLogger) stopQuoteSourceClient (\_ -> do
       let bar = Bar {
           barSecurity = "FOOBAR",
           barTimestamp = UTCTime (fromGregorian 2016 9 27) 16000,
@@ -86,7 +87,7 @@ testDynamicSubscription = testCase "QuoteSource clients can subscribe dynamicall
   chan <- newBoundedChan 1000
   clientChan <- newBoundedChan 1000
   bracket (startQuoteSourceServer chan ctx ep defaultServerSecurityParams) stopQuoteSourceServer (\_ ->
-    bracket (startQuoteSourceClient clientChan [] ctx ep defaultClientSecurityParams) stopQuoteSourceClient (\client -> do
+    bracket (startQuoteSourceClient clientChan [] ctx ep defaultClientSecurityParams emptyLogger) stopQuoteSourceClient (\client -> do
       quoteSourceClientSubscribe client [("FOOBAR", BarTimeframe 60)]
       let bar = Bar {
           barSecurity = "FOOBAR",
