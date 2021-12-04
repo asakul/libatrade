@@ -39,7 +39,6 @@ library
                      , connection
                      , containers
                      , datetime
-                     , deepseq
                      , errors
                      , extra
                      , gitrev
@@ -50,7 +49,6 @@ library
                      , parsec
                      , safe
                      , scientific
-                     , stm
                      , text
                      , th-printf
                      , time
