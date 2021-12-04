@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE RankNTypes #-}
 
 module ATrade.Logging
   (
@@ -20,10 +21,11 @@ module ATrade.Logging
     logDebugWith,
     logInfoWith,
     logWarningWith,
-    logErrorWith
+    logErrorWith,
+    emptyLogger
   ) where
 
-import           Colog                    (LogAction (unLogAction), WithLog,
+import           Colog                    (LogAction (unLogAction, LogAction), WithLog,
                                            logMsg)
 import           Control.Monad.IO.Class   (MonadIO (liftIO))
 import qualified Data.Text                as T
@@ -53,6 +55,9 @@ data Message =
     msgSeverity  :: Severity,
     msgText      :: T.Text
   } deriving (Show, Eq)
+
+emptyLogger :: forall m. (MonadIO m) => LogAction m Message
+emptyLogger = LogAction (const $ return ())
 
 fmtMessage :: Message -> T.Text
 fmtMessage Message{..} =
