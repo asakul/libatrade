@@ -5,26 +5,37 @@ module ATrade.QuoteSource.Server (
   QuoteSourceServerData(..)
 ) where
 
-import           ATrade.Types
-import           Control.Concurrent             hiding (readChan, writeChan)
-import           Control.Concurrent.BoundedChan
-import           Control.Exception
-import           Control.Monad
+import           ATrade.Types                   (Bar, BarTimeframe, ServerSecurityParams (sspCertificate, sspDomain),
+                                                 Tick (security), serializeBar,
+                                                 serializeTickBody)
+import           Control.Concurrent             (MVar, ThreadId, forkIO,
+                                                 killThread, myThreadId,
+                                                 newEmptyMVar, putMVar,
+                                                 readMVar, threadDelay)
+import           Control.Concurrent.BoundedChan (BoundedChan, readChan,
+                                                 tryReadChan, writeChan)
+import           Control.Exception              (finally)
+import           Control.Monad                  (Monad (return, (>>)), forever,
+                                                 mapM_, unless, when)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Char8          as B8
 import qualified Data.ByteString.Lazy           as BL
-import           Data.Foldable
+import           Data.Foldable                  (Foldable (elem, foldl'))
 import qualified Data.List                      as L
-import           Data.List.NonEmpty             hiding (map)
-import           Data.Maybe
+import           Data.List.NonEmpty             (fromList)
+import           Data.Maybe                     (Maybe (Just, Nothing))
 import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as E
 import           Prelude                        hiding ((!!))
-import           System.Log.Logger
-import           System.ZMQ4
-import           System.ZMQ4.ZAP
+import           System.Log.Logger              (debugM)
+import           System.ZMQ4                    (Context, Pub (..), Socket,
+                                                 bind, close, restrict, send,
+                                                 sendMulti, setCurveServer,
+                                                 setLinger, setZapDomain,
+                                                 socket)
+import           System.ZMQ4.ZAP                (zapApplyCertificate)
 
-import           Safe
+import           Safe                           (headMay)
 
 data QuoteSourceServer = QuoteSourceServerState {
   ctx               :: Context,
