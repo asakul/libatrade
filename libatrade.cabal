@@ -42,7 +42,6 @@ library
                      , errors
                      , extra
                      , gitrev
-                     , hslogger
                      , http-client
                      , http-client-tls
                      , monad-loops
@@ -81,7 +80,6 @@ test-suite libatrade-test
                      , aeson
                      , text
                      , BoundedChan
-                     , hslogger
                      , zeromq4-haskell
                      , zeromq4-haskell-zap
                      , bytestring

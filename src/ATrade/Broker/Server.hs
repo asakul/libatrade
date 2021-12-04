@@ -52,7 +52,6 @@ import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as E
 import           Data.Time.Clock                ()
 import           Safe                           (lastMay)
-import           System.Log.Logger              (debugM, warningM)
 import           System.Timeout                 ()
 import           System.ZMQ4                    (Context, Event (In),
                                                  Poll (Sock), Pub (..),

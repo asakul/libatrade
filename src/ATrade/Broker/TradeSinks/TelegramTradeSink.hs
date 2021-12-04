@@ -18,7 +18,6 @@ import           Data.IORef
 import qualified Data.List                      as L
 import           Data.List.NonEmpty
 import           Data.Maybe
-import           System.Log.Logger
 
 import           ATrade.Broker.Protocol
 import           ATrade.Types

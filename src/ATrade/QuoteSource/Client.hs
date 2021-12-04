@@ -38,7 +38,6 @@ import qualified Data.Set                       as S
 import qualified Data.Text                      as T
 import           Data.Text.Encoding             (decodeUtf8, encodeUtf8)
 import           Data.Time.Clock                (diffUTCTime, getCurrentTime)
-import           System.Log.Logger              (debugM)
 import           System.ZMQ4                    (Context, Event (In),
                                                  Poll (Sock), Sub (Sub),
                                                  connect, poll, receiveMulti,

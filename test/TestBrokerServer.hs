@@ -28,7 +28,6 @@ import           Data.UUID              as U
 import           Data.UUID.V4           as UV4
 import           Debug.Trace            (traceM)
 import           MockBroker
-import           System.Log.Logger
 import           System.ZMQ4
 
 unitTests :: TestTree
