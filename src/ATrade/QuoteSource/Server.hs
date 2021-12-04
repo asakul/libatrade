@@ -27,7 +27,6 @@ import           Data.Maybe                     (Maybe (Just, Nothing))
 import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as E
 import           Prelude                        hiding ((!!))
-import           System.Log.Logger              (debugM)
 import           System.ZMQ4                    (Context, Pub (..), Socket,
                                                  bind, close, restrict, send,
                                                  sendMulti, setCurveServer,
@@ -52,7 +51,6 @@ data QuoteSourceServerData = QSSTick Tick | QSSBar (BarTimeframe, Bar) | QSSHear
 serverThread :: QuoteSourceServer -> IO ()
 serverThread state = do
   finally serverThread' cleanup
-  debugM "QuoteSource" "server thread done"
   where
     cleanup = do
       close $ outSocket state
