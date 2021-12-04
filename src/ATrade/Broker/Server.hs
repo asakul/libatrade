@@ -7,32 +7,60 @@ module ATrade.Broker.Server (
   TradeSink
 ) where
 
-import           ATrade.Broker.Backend
-import           ATrade.Broker.Protocol
-import           ATrade.Types
-import           ATrade.Util
-import           Control.Concurrent             hiding (readChan, writeChan)
-import           Control.Concurrent.BoundedChan
-import           Control.Exception
-import           Control.Monad
-import           Control.Monad.Loops
-import           Data.Aeson
+import           ATrade.Broker.Backend          (BrokerBackend (..),
+                                                 BrokerBackendNotification (..),
+                                                 backendNotificationOrderId)
+import           ATrade.Broker.Protocol         (BrokerServerRequest (..),
+                                                 BrokerServerResponse (..),
+                                                 ClientIdentity,
+                                                 Notification (..),
+                                                 NotificationSqnum (NotificationSqnum),
+                                                 RequestSqnum,
+                                                 getNotificationSqnum,
+                                                 nextSqnum, requestSqnum)
+import           ATrade.Types                   (Order (orderAccountId, orderId),
+                                                 OrderId,
+                                                 ServerSecurityParams (sspCertificate, sspDomain),
+                                                 Trade (tradeOrderId))
+import           ATrade.Util                    (atomicMapIORef)
+import           Control.Concurrent             (MVar, ThreadId, forkIO,
+                                                 killThread, myThreadId,
+                                                 newEmptyMVar, putMVar,
+                                                 readMVar, threadDelay,
+                                                 tryReadMVar, yield)
+import           Control.Concurrent.BoundedChan (BoundedChan, newBoundedChan,
+                                                 tryReadChan, tryWriteChan)
+import           Control.Exception              (finally)
+import           Control.Monad                  (unless)
+import           Control.Monad.Loops            (whileM_)
+import           Data.Aeson                     (eitherDecode, encode)
 import qualified Data.Bimap                     as BM
 import qualified Data.ByteString                as B hiding (putStrLn)
 import qualified Data.ByteString.Lazy           as BL hiding (putStrLn)
-import           Data.IORef
+import           Data.IORef                     (IORef, atomicModifyIORef',
+                                                 newIORef, readIORef)
 import qualified Data.List                      as L
-import           Data.List.NonEmpty
+import           Data.List.NonEmpty             (NonEmpty ((:|)))
 import qualified Data.Map                       as M
-import           Data.Maybe
+import           Data.Maybe                     (isJust, isNothing)
 import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as E
-import           Data.Time.Clock
+import           Data.Time.Clock                ()
 import           Safe                           (lastMay)
-import           System.Log.Logger
-import           System.Timeout
-import           System.ZMQ4
-import           System.ZMQ4.ZAP
+import           System.Log.Logger              (debugM, warningM)
+import           System.Timeout                 ()
+import           System.ZMQ4                    (Context, Event (In),
+                                                 Poll (Sock), Pub (..),
+                                                 Router (..), Socket,
+                                                 Switch (On), bind, close, poll,
+                                                 receiveMulti, restrict,
+                                                 sendMulti, setCurveServer,
+                                                 setLinger, setTcpKeepAlive,
+                                                 setTcpKeepAliveCount,
+                                                 setTcpKeepAliveIdle,
+                                                 setTcpKeepAliveInterval,
+                                                 setZapDomain, socket)
+import           System.ZMQ4.ZAP                (zapApplyCertificate)
 
 newtype OrderIdGenerator = IO OrderId
 type PeerId = B.ByteString
@@ -59,7 +87,13 @@ data BrokerServerHandle = BrokerServerHandle ThreadId ThreadId (MVar ()) (MVar (
 
 type TradeSink = Trade -> IO ()
 
-startBrokerServer :: [BrokerBackend] -> Context -> T.Text -> T.Text -> [TradeSink] -> ServerSecurityParams -> IO BrokerServerHandle
+startBrokerServer :: [BrokerBackend] ->
+                     Context ->
+                     T.Text ->
+                     T.Text ->
+                     [TradeSink] ->
+                     ServerSecurityParams ->
+                     IO BrokerServerHandle
 startBrokerServer brokers c ep notificationsEp tradeSinks params = do
   sock <- socket c Router
   notificationsSock <- socket c Pub
